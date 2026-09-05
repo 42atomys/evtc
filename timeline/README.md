@@ -546,6 +546,32 @@ The builder follows the field layout of the arcdps `README.txt`
 | `REWARD`, `MAPCHANGE`, `INTEGRITY`                                                                  | `dst_agent` id and `value` type; `src_agent` new map, `dst_agent` old map and `value` type; `time` as char[32]                                                                                                                                                                                     | `Timeline.Rewards`, `MapChanges`, `Integrity`                                                                                                                                                |
 | `EXTENSION`, `EXTENSIONCOMBAT`                                                                      | `src_agent` low 32 bits as the signature and `dst_agent` as text; `pad61` to `pad64` as the signature of the writer, `skillid` as a skill (arcdps adds it to the skill table), the rest as logged                                                                                                  | `Timeline.Extensions`, `Extension.Events()`, `Timeline.ExtensionEvents()`, `Skill`; the events go to the `ExtensionDecoder` registered for the signature, whose graph is `Extension.Decoded` |
 
+## Performance
+
+Building the graph costs about 190 ns and 150 bytes per event, in one
+allocation per node type: the 183k events of a five minute raid log take
+about 35 ms and 30 MB, effects, missiles, buff activity and duration
+changes included. Point lookups (`PositionAt`, `HealthAt`,
+`LifeStateAt`, `AgentAt`) run in 3 to 20 ns without allocating; a filter
+allocates its closure once and a traversal allocates nothing, so a query
+such as `boss.Hits().On(player).Blocked().Any()` costs a handful of
+allocations however many hits the log holds.
+
+`go test ./timeline -bench . -benchmem` prints the numbers for your
+machine; the integration tests and benchmarks on a real log run when
+`tests_fixtures/sabetha-05-fd9b6f3a.zevtc` is present at the repository
+root and skip otherwise. `go run ./examples/sabetha` prints a full report
+of that log written with the public API.
+
+`EVTC_REAL_LOGS=1 go test ./timeline -run TestRealLogs -v` builds every
+log under `tests_fixtures/`, checks the invariants, runs the API on each
+and reports how much of every log the graph consumes: over 152 logs of
+raids, strikes, fractals and convergences (27.9 million events), 96.9% of
+the events are held by a node or read into a field, the rest being
+remove-all summaries, marker removals on agents and ground positions that
+wore none (96% of the marker events arcdps writes), capture points and a
+few removes whose creation predates the log.
+
 ## Not modeled
 
 Capture points (`GADGETCAPTURE*`), WvW objectives and the retired
