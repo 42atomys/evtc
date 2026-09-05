@@ -165,6 +165,350 @@ hits and events whose source the log does not know; it is never nil.
   its receiver (`EndedByDespawn`): minions and NPCs leave tracking with
   their buffs and no removal is logged for them.
 
+## Cookbook
+
+Every snippet below is an `Example` test of the package
+(`example_readme_test.go`), run on a five second synthetic fight: two
+players, Alpha and Bravo, against Sabetha. The outputs are checked by
+`go test`.
+
+### Open a log
+
+```go
+log := cookbookLog() // evtc.ParseFile("fight.zevtc") on a real file
+tl, err := timeline.Build(log)
+if err != nil {
+	panic(err) // timeline.ErrLegacyLog for logs older than arcdps 20260501
+}
+fmt.Println(tl.Boss().Name, "fought by", len(tl.Players), "players for", tl.Duration)
+fmt.Println("arcdps build", tl.Build, "events", tl.Events().Count(), "hits", tl.Hits().Count())
+// Sabetha fought by 2 players for 5s
+// arcdps build 20260816 events 50 hits 8
+```
+
+### Players and lookups
+
+```go
+for _, p := range tl.Players {
+	fmt.Println(p.Name, p.Account, "group", p.Subgroup, p.Spec())
+}
+fmt.Println(tl.PlayerByAccount("Bravo.5678").Toughness, tl.PlayerByName("Nobody") == nil)
+// Alpha Alpha.1234 group 1 Firebrand
+// Bravo Bravo.5678 group 2 Warrior
+// 1500 true
+```
+
+```go
+fmt.Println(tl.AgentAt(instBoss, time.Second), tl.TargetBySpeciesIDAt(15375, time.Second).Boss)
+fmt.Println(tl.Agent(alpha).Player.Spec(), tl.Agent(0xdead) == nil)
+// Sabetha(NPC#15375) true
+// Firebrand true
+```
+
+### Damage per player
+
+```go
+landed := tl.Boss().HitsTaken().Landed()
+fmt.Println("total", landed.Damage(), "damage,", landed.Count(), "landed hits")
+for _, c := range landed.PerAgent() {
+	fmt.Printf("%s %d (%.0f%%)\n", c.Agent.Name, c.Hits.Damage(), 100*float64(c.Hits.Damage())/float64(landed.Damage()))
+}
+// total 1500 damage, 3 landed hits
+// Alpha 1000 (67%)
+// Bravo 500 (33%)
+```
+
+`PerAgent` credits the hits of a minion (pet, clone, turret) to its master.
+From the player's side, `p.HitsCredited().On(boss)` holds the same hits.
+
+### Rankings
+
+```go
+for _, s := range tl.Boss().HitsTaken().Landed().PerSkill() {
+	fmt.Println(s.Skill.Name, s.Hits.Count(), "hits,", s.Hits.Damage(), "damage")
+}
+for _, c := range tl.Hits().Landed().PerTarget() {
+	fmt.Println(c.Agent.Name, "took", c.Hits.Damage())
+}
+for _, c := range tl.Casts().PerSkill() {
+	fmt.Println(c.Skill.Name, "cast", c.Casts.Count(), "time by", c.Casts.First().Caster.Name)
+}
+// Slam 3 hits, 1500 damage
+// Sabetha took 1500
+// Alpha took 100
+// Slam cast 1 time by Alpha
+```
+
+### Phases by health and DPS
+
+```go
+boss := tl.Boss()
+for i, phase := range boss.PhasesByHealth(66.6, 33.3) {
+	fmt.Printf("phase %d %v: %.0f dps\n", i+1, phase, boss.HitsTaken().Landed().DPS(phase))
+}
+at, _ := boss.HealthBelow(33.3)
+fmt.Println("below 33.3% at", at, "health at 2s:", boss.HealthAt(2*time.Second))
+// phase 1 [0s, 1.8s]: 833 dps
+// phase 2 [1.8s, 4s]: 0 dps
+// phase 3 [4s, 4.5s]: 0 dps
+// below 33.3% at 4s health at 2s: 60
+```
+
+`PhasesByBuff(id)` removes the spans where the agent carried a buff, for
+bosses that phase through invulnerability.
+
+### From a cast to its hits
+
+```go
+alpha, boss := tl.Players[0], tl.Boss()
+cast := alpha.Casts().OfSkill(slam).First()
+fmt.Println(cast.Skill, cast.Interval, "completed:", cast.Completed())
+fmt.Println("hits:", cast.Hits().Count(), "crit:", cast.Hits().Crits().Count(), "damage:", cast.Hits().Damage())
+fmt.Println("blocked by Alpha:", boss.Hits().On(alpha).Blocked().Any())
+// Slam (100) [1s, 1.5s] completed: true
+// hits: 2 crit: 1 damage: 1000
+// blocked by Alpha: true
+```
+
+A hit belongs to the most recent cast of the same skill by the same agent,
+so projectiles landing after the animation are still attributed.
+
+### Positions and distances
+
+```go
+alpha, boss := tl.Players[0], tl.Boss()
+at := time.Second
+fmt.Println(alpha.PositionAt(at), boss.PositionAt(at))
+fmt.Printf("%.0f units apart\n", alpha.DistanceTo(boss, at))
+fmt.Println("unknown:", math.IsNaN(alpha.DistanceTo(boss, 10*time.Second)))
+// {150 0 0} {300 400 0}
+// 427 units apart
+// unknown: true
+```
+
+### Buff stacks and uptime
+
+```go
+alpha := tl.Players[0]
+stacks := alpha.Stacks().OfBuff(timeline.BuffMight)
+fmt.Println("might stacks:", stacks.Count(), "at 2s:", stacks.CountAt(2*time.Second), "at 3s:", stacks.CountAt(3*time.Second))
+fmt.Println("uptime:", stacks.Uptime(tl.Interval()), "average:", stacks.Average(tl.Interval()), "applied by", stacks.First().Applier.Name)
+// might stacks: 1 at 2s: 1 at 3s: 0
+// uptime: 1.5s average: 0.3 applied by Bravo
+```
+
+### Downs, deaths and life state
+
+```go
+bravo := tl.Players[1]
+down := bravo.Downs[0]
+fmt.Println(bravo.Name, "down", down.Interval, "by", down.Cause.Skill.Name, "from", down.Cause.Src.Name, "recovered:", down.Recovered)
+fmt.Println(bravo.IsDownAt(2500*time.Millisecond), bravo.DownedBetween(tl.Since(4*time.Second)), len(bravo.DownsOf(tl.Skill(flak))), len(bravo.DownsBy(tl.Boss())))
+fmt.Println("life at 2.5s:", bravo.LifeStateAt(2500*time.Millisecond), "died:", bravo.DiedBefore(tl.Duration))
+// Bravo down [2.2s, 3s] by Flak Shot from Sabetha recovered: true
+// true false 1 1
+// life at 2.5s: Down died: false
+```
+
+```go
+bravo := tl.Players[1]
+died, _ := bravo.DiedAt()
+fmt.Println("alive", bravo.AliveTime(tl.Interval()), "down", bravo.DownTime(tl.Interval()), "died:", died)
+fmt.Println("in combat", tl.Players[0].CombatTime(tl.Interval()))
+// alive 3.2s down 800ms died: 0s
+// in combat 0s
+```
+
+```go
+boss := tl.Boss()
+lowest, _ := boss.Health.MinBetween(tl.Until(2 * time.Second))
+fmt.Println("lowest health in the first two seconds:", lowest)
+fmt.Println("time under 66.6%:", boss.Health.TimeBelow(66.6, tl.Interval()), "of", boss.Lifetime.Duration())
+// lowest health in the first two seconds: 60
+// time under 66.6%: 2.7s of 4.5s
+```
+
+Bravo is only tracked from its first event at 1 s, so its life state starts
+there.
+
+### Breakbars and crowd control
+
+```go
+bb := tl.Boss().Breakbars[0]
+fmt.Println(bb.Interval, "broken:", bb.Broken(), "cc:", bb.TotalCC())
+for _, c := range bb.Hits().PerAgent() {
+	fmt.Println(c.Agent.Name, c.Hits.Damage(), "cc at", c.Hits.First().Time)
+}
+// [3s, 3.5s] broken: true cc: 500
+// Bravo 300 cc at 3.4s
+// Alpha 200 cc at 3.2s
+```
+
+### The latest hits
+
+```go
+for _, h := range tl.Hits().Landed().Reverse().Limit(2).All() {
+	fmt.Println(h.Time, h.Src.Name, "->", h.Dst.Name, h.Damage)
+}
+fmt.Println("second landed hit:", tl.Hits().Landed().Skip(1).First().Damage)
+// 4.5s Sabetha -> Alpha 100
+// 1.6s Bravo -> Sabetha 500
+// second landed hit: 300
+```
+
+### Raw events
+
+```go
+bravo := tl.Players[1]
+e := tl.Events().Involving(bravo).Of(evtc.StateChangeDown).First()
+fmt.Println(tl.TimeOf(e), e.IsStateChange, "src", e.SrcAgent == bravo.Addr)
+fmt.Println(bravo.Events().Count(), "events involve", bravo.Name)
+// 2.2s ChangeDown src true
+// 9 events involve Bravo
+```
+
+Every node keeps a pointer to the raw `evtc.Event` it came from, so what
+the graph does not model is still reachable through `Event`, and
+`evtc.Event.Bytes()` gives the 64-byte wire layout when a payload spans
+several fields.
+
+### Session, squad and weapon sets
+
+```go
+fmt.Println("commander:", tl.Commander().Name, "| language:", tl.Language, "| game build:", tl.GameBuild)
+alpha := tl.Players[0]
+fmt.Println("weapon swaps:", alpha.WeaponSet.Len()-1, "| set at 3s:", alpha.WeaponSetAt(3*time.Second))
+// commander: Alpha | language: French | game build: 205780
+// weapon swaps: 1 | set at 3s: 1
+```
+
+### Squad markers and the commander tag
+
+```go
+bravo := tl.Players[1]
+m := bravo.Markers[0]
+fmt.Println(m.Squad, "on", bravo.Name, m.Interval, "removed:", m.Removed(), "| at 2s:", bravo.SquadMarkerAt(2*time.Second), "| at 4s:", bravo.SquadMarkerAt(4*time.Second))
+heart := tl.GroundMarkerAt(timeline.SquadHeart, 2500*time.Millisecond)
+fmt.Println("heart on the ground at", heart.Position, heart.Interval, "| placements:", len(tl.GroundMarkers))
+fmt.Println("commander at 1s:", tl.CommanderAt(time.Second).Name, "| tag:", tl.Commander().Markers[0].Tag)
+// Heart on Bravo [1s, 3s] removed: true | at 2s: Heart | at 4s: None
+// heart on the ground at {100 100 0} [2s, 4s] | placements: 2
+// commander at 1s: Alpha | tag: Red
+```
+
+A marker on an agent has no position of its own: `agent.PositionAt(t)` is
+where it was drawn. Most markers of a raid log are put by the game on NPCs
+for a mechanic (the aspects of Dhuum, the lamps of Qadim); their GUIDs are
+not named by the package, so compare `Marker.GUID` with the one you parsed
+with `ParseGUID`.
+
+### Effects
+
+```go
+f := tl.Boss().Effects().Ground().First()
+fmt.Println(f.EffectID, "at", f.Origin, "for", f.Duration, f.Interval, "removed:", f.Removed())
+fmt.Println("effects present at 2s:", tl.Effects().At(2*time.Second).Count())
+// 7000 at {300 400 0} for 2s [1.9s, 2.4s] removed: true
+// effects present at 2s: 1
+```
+
+### Missiles
+
+```go
+m := tl.Players[0].Missiles().First()
+fmt.Println(m.Skill.Name, "from", m.Origin, m.Interval, "aimed at", m.Target().Name, "| hit:", m.HitEnemy)
+fmt.Println(len(m.Launches), "launch at", m.Launches[0].Time, "towards", m.Launches[0].TargetPos)
+// Slam from {180 0 0} [1.1s, 1.2s] aimed at Sabetha | hit: true
+// 1 launch at 1.15s towards {300 400 0}
+```
+
+### Gadgets, jumps and rewards
+
+```go
+boss := tl.Boss()
+fmt.Println("animations:", len(boss.GadgetAnimations), "| name shown at 1s:", boss.IsNameVisibleAt(time.Second), "| at 4s:", boss.IsNameVisibleAt(4*time.Second))
+fmt.Println("alpha airborne at 1.2s:", tl.Players[0].IsAirborneAt(1200*time.Millisecond), "| rewards:", len(tl.Rewards))
+// animations: 1 | name shown at 1s: true | at 4s: false
+// alpha airborne at 1.2s: true | rewards: 1
+```
+
+The Sabetha sample log, recorded in a raid instance, carries gadget
+animations and name states but no jump, reward, map change or integrity
+event; those kinds show up in open-world logs.
+
+### Extensions
+
+```go
+x := tl.Extension(timeline.ExtensionHealingStats)
+fmt.Printf("extension %#x version %s wrote %d of the %d extension events\n", x.Signature, x.Version, x.Events().Count(), tl.ExtensionEvents().Count())
+e := x.Events().On(tl.Players[0]).First()
+fmt.Println("first on Alpha:", tl.Agent(e.SrcAgent).Name, "buff_dmg", e.BuffDamage, "at", tl.TimeOf(e), "| written by", tl.ExtensionOf(e).Version)
+// extension 0x9c9b3c99 version 2.18rc1 wrote 1 of the 1 extension events
+// first on Alpha: Bravo buff_dmg -262 at 1.3s | written by 2.18rc1
+```
+
+The healing stats addon is the one extension found in raid logs, and the
+[`extensions/healingstats`](../extensions/healingstats/README.md) package
+of this module decodes its events into heals linked to the agents, skills
+and casts of the timeline: `healingstats.Of(tl)` returns them once the
+package is imported. The snippet above is what the timeline offers on its
+own for any extension.
+
+### Projecting to your own types
+
+```go
+type row struct {
+	At     time.Duration
+	Skill  string
+	Damage int32
+}
+rows := tl.Boss().HitsTaken().Strikes().Map(func(h *timeline.Hit) row {
+	return row{h.Time, h.Skill.Name, h.Damage}
+})
+fmt.Printf("%+v\n", rows)
+// [{At:1.2s Skill:Slam Damage:700} {At:1.4s Skill:Slam Damage:300} {At:1.6s Skill:Slam Damage:500}]
+```
+
+The graph is cyclic, so it has no JSON form of its own: project the nodes
+you need with `Map` and encode that.
+
+## Recipes
+
+Answers that need a rule of the game or of arcdps rather than a method,
+taken from `examples/sabetha`, a full report of a raid log.
+
+**Cleanses and strips.** When a skill removes a buff from someone else,
+arcdps writes one manual removal per stack naming the agent that did it;
+natural expiries are single removals.
+
+```go
+cleansed := tl.Stacks().RemovedBy(player).Where(func(s *timeline.BuffStack) bool {
+	return s.Receiver != player.Agent && s.Removal == evtc.BuffRemoveManual && s.Buff.IsCondition()
+})
+```
+
+**Boon generation.** What a player gives depends on how the boon stacks:
+stacks for might or stability, uptime for fury, quickness or alacrity.
+
+```go
+applied := player.StacksApplied().OfBuff(id).On(receiver)
+if tl.Buff(id).Stacking.Intensity() {
+	stacks := applied.EffectiveAverage(iv)
+} else {
+	uptime := applied.Uptime(iv).Seconds() / iv.Duration().Seconds()
+}
+```
+
+**Destroyed gadgets.** A cannon of Sabetha starts at 0% health, is armed
+at 100% and its health collapses when it is destroyed, without reaching
+zero before arcdps stops updating it: every fall under 25% is one
+destruction, found with `gadget.Health.Crossings(25)` and the `Falling`
+direction. `FirstBelow` would answer with the start of the lifetime.
+
+**Time alive.** A dead player sits at 0% health and keeps no buff: measure
+uptimes, averages and `TimeBelow` over `tl.Until(died)` when `DiedAt`
+reports a death.
+
 ## What is read from the log
 
 The builder follows the field layout of the arcdps `README.txt`
