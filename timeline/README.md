@@ -572,6 +572,22 @@ remove-all summaries, marker removals on agents and ground positions that
 wore none (96% of the marker events arcdps writes), capture points and a
 few removes whose creation predates the log.
 
+## Extensions
+
+arcdps extensions write combat events whose layout belongs to them. The
+timeline keeps those events attached to their `Extension` and decodes
+nothing of them itself: each extension is handled by a package of its
+own. Such a package implements `ExtensionDecoder` and registers it from
+its `init` function with `RegisterExtension`: `Build` hands every
+registered extension found in a log to its decoder once the core graph
+is complete, and keeps the result in `Extension.Decoded`. Importing the
+package is all a program does; the package offers a typed accessor for
+the result.
+
+`extensions/healingstats` decodes the healing stats addon this way; its
+agent nodes embed the timeline agents, so every filter of this package
+accepts them.
+
 ## Not modeled
 
 Capture points (`GADGETCAPTURE*`), WvW objectives and the retired
