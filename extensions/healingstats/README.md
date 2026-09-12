@@ -220,3 +220,19 @@ Insights reads the same events and, for the heals written twice, keeps
 the records of one client per source, destination and skill instead of
 pairing them.
 
+## Performance
+
+The decode runs inside `timeline.Build`, after the core graph, in one
+arena per node type: about 180 ns and 200 bytes per event of the addon,
+under a millisecond for the two thousand heals of a raid log. Queries
+follow the rules of the timeline: point lookups and lazy terminals
+allocate nothing, a filter allocates its closure once.
+
+`go test ./extensions/healingstats -bench .` prints the numbers for your
+machine; the integration tests run when
+`tests_fixtures/sabetha-05-fd9b6f3a.zevtc` is present at the repository
+root and skip otherwise, and
+`EVTC_REAL_LOGS=1 go test ./extensions/healingstats -run TestRealLogs -v`
+decodes every log under `tests_fixtures/` and reports, per log, the
+heals, the records merged and the heals between recording players that
+only one client wrote.
