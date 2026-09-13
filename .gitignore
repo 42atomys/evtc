@@ -1,2 +1,8 @@
-/tmp/
+# Combat logs are large and carry the account names of the whole squad:
+# keep them local.
+*.evtc
 *.zevtc
+/tests_fixtures/
+/tmp/
+
+/.vscode/
