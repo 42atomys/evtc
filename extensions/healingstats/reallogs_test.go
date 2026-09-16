@@ -92,7 +92,7 @@ func smoke(t *testing.T, s *Stats) {
 	tl := s.Timeline
 	iv := tl.Interval()
 	half := timeline.NewInterval(0, tl.Duration/2)
-	for _, p := range s.Players {
+	for p := range s.Players().Seq() {
 		p.Heals().Healed()
 		p.HealsCredited().Healing().PerSkill()
 		p.HealsTaken().PerAgent()

@@ -14,7 +14,7 @@ import (
 // squad members sharing their stats.
 const samplePath = "../../tests_fixtures/sabetha-05-fd9b6f3a.zevtc"
 
-// Players of the sample log, by their index in Stats.Players.
+// Players of the sample log, by their index in Stats.Players().
 var (
 	sampleRecorded = []int{0, 1, 7, 9} // the recording player first
 	sampleHealer   = 4                 // top healer, without the addon
@@ -51,13 +51,13 @@ func TestSampleOverview(t *testing.T) {
 		names = append(names, p.Name)
 	}
 	for _, i := range sampleRecorded {
-		want = append(want, s.Players[i].Name)
+		want = append(want, s.players[i].Name)
 	}
 	if !slices.Equal(names, want) {
 		t.Errorf("recorded = %v, want %v", names, want)
 	}
 	pov := s.Agent(tl.POV)
-	if pov == nil || pov != s.Players[0] || !pov.Recorded || pov.Heals().Count() != 561 || pov.HealsTaken().Count() != 543 || pov.HealsCredited().Count() != 561 || pov.Heals().Healed() != 92624 {
+	if pov == nil || pov != s.Players().First() || !pov.Recorded || pov.Heals().Count() != 561 || pov.HealsTaken().Count() != 543 || pov.HealsCredited().Count() != 561 || pov.Heals().Healed() != 92624 {
 		t.Errorf("pov = %v: %d heals, %d taken, %d healed", pov, pov.Heals().Count(), pov.HealsTaken().Count(), pov.Heals().Healed())
 	}
 	q := s.Heals()
@@ -68,7 +68,7 @@ func TestSampleOverview(t *testing.T) {
 		t.Errorf("heals attributed to a cast = %d", withCast)
 	}
 	first := q.First()
-	if first.Time != 796*time.Millisecond || first.Src.Name != "Mech de jade CJ-1" || first.Dst.Name != s.Players[sampleBarrier].Name || first.Skill.Name != "Explosion de barrière" || first.Amount != 455 || !first.IsBarrier || first.Credited().Player == nil || first.Credited() == first.Src {
+	if first.Time != 796*time.Millisecond || first.Src.Name != "Mech de jade CJ-1" || first.Dst.Name != s.players[sampleBarrier].Name || first.Skill.Name != "Explosion de barrière" || first.Amount != 455 || !first.IsBarrier || first.Credited().Player == nil || first.Credited() == first.Src {
 		t.Errorf("first heal = %+v credited to %v", first, first.Credited())
 	}
 	if last := q.Last(); last.Time != 315101*time.Millisecond {
@@ -80,7 +80,7 @@ func TestSampleOverview(t *testing.T) {
 func TestSampleRankings(t *testing.T) {
 	s := loadSample(t)
 	tl := s.Timeline
-	healer := s.Players[sampleHealer]
+	healer := s.players[sampleHealer]
 	healers := s.Heals().Healing().PerAgent()
 	if len(healers) < 5 || healers[0].Agent.Name != healer.Name || healers[0].Heals.Count() != 256 || healers[0].Heals.Healed() != 245625 {
 		t.Errorf("%d healers, top %v with %d heals for %d", len(healers), healers[0].Agent, healers[0].Heals.Count(), healers[0].Heals.Healed())

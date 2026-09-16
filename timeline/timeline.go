@@ -48,19 +48,12 @@ type Timeline struct {
 	MapID uint32
 	// POV is the recording player, nil when unknown.
 	POV *Player
-	// Agents holds every agent of the agent table, in table order,
-	// followed by the agents synthesized for addresses that events
-	// reference without a table entry.
-	Agents []*Agent
-	// Targets holds the boss of the log first, then every NPC or gadget
-	// that exchanged hits with the players, in order of first exchange.
-	Targets []*Target
 	// Skills are the skill definitions, sorted by id.
 	Skills []*Skill
 	// Buffs are the buff definitions, sorted by id.
 	Buffs []*Buff
 	// Unknown is the sentinel agent standing for an unknown source or
-	// destination (environment, out of range). It is not part of Agents.
+	// destination (environment, out of range). It is not part of Agents().
 	Unknown *Agent
 	// Language is the text language of the recording client.
 	Language Language
@@ -100,7 +93,9 @@ type Timeline struct {
 	// registration order.
 	Extensions []*Extension
 
+	agents   []*Agent
 	players  []*Player
+	targets  []*Target
 	npcs     []*Agent
 	gadgets  []*Agent
 	byAddr   map[uint64]*Agent
@@ -148,11 +143,20 @@ func ParseFile(path string) (*Timeline, error) {
 	return Build(l)
 }
 
+// Agents returns every agent of the agent table, in table order, followed
+// by the agents synthesized for addresses that events reference without a
+// table entry.
+func (tl *Timeline) Agents() Agents { return Agents{From(tl.agents)} }
+
+// Targets returns the boss of the log first, then every NPC or gadget that
+// exchanged hits with the players, in order of first exchange.
+func (tl *Timeline) Targets() Targets { return Targets{From(tl.targets)} }
+
 // NPCs returns the non-player characters of the log, in table order.
-func (tl *Timeline) NPCs() []*Agent { return tl.npcs }
+func (tl *Timeline) NPCs() Agents { return Agents{From(tl.npcs)} }
 
 // Gadgets returns the gadgets of the log, in table order.
-func (tl *Timeline) Gadgets() []*Agent { return tl.gadgets }
+func (tl *Timeline) Gadgets() Agents { return Agents{From(tl.gadgets)} }
 
 // Agent returns the agent with the given address, following address
 // changes, or nil when there is none. Address 0, which the log writes when
@@ -257,7 +261,7 @@ func (tl *Timeline) Events() Events { return Events{Query: From(tl.events), tl: 
 
 // Boss returns the boss of the log, nil when the log designates none.
 func (tl *Timeline) Boss() *Target {
-	for _, t := range tl.Targets {
+	for _, t := range tl.targets {
 		if t.Boss {
 			return t
 		}
@@ -268,7 +272,7 @@ func (tl *Timeline) Boss() *Target {
 // TargetBySpeciesID returns the first target of the given species in
 // order of engagement, or nil. Gadgets match on their volatile id.
 func (tl *Timeline) TargetBySpeciesID(id uint16) *Target {
-	for _, t := range tl.Targets {
+	for _, t := range tl.targets {
 		if t.SpeciesID == id {
 			return t
 		}
@@ -276,24 +280,12 @@ func (tl *Timeline) TargetBySpeciesID(id uint16) *Target {
 	return nil
 }
 
-// TargetsBySpeciesID returns every target of the given species in order
-// of engagement, nil when there is none.
-func (tl *Timeline) TargetsBySpeciesID(id uint16) []*Target {
-	var out []*Target
-	for _, t := range tl.Targets {
-		if t.SpeciesID == id {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
 // TargetBySpeciesIDAt returns the target of the given species that was
 // tracked at t: the one whose lifetime contains t, otherwise the nearest
 // within InstanceTolerance, otherwise nil.
 func (tl *Timeline) TargetBySpeciesIDAt(id uint16, t time.Duration) *Target {
 	var n nearest[*Target]
-	for _, tg := range tl.Targets {
+	for _, tg := range tl.targets {
 		if tg.SpeciesID == id && n.consider(tg, tg.Lifetime, t) {
 			break
 		}
@@ -321,18 +313,6 @@ func (tl *Timeline) PlayerByName(name string) *Player {
 		}
 	}
 	return nil
-}
-
-// AgentsNamed returns every agent with the given name in table order, nil
-// when there is none.
-func (tl *Timeline) AgentsNamed(name string) []*Agent {
-	var out []*Agent
-	for _, a := range tl.Agents {
-		if a.Name == name {
-			out = append(out, a)
-		}
-	}
-	return out
 }
 
 // Since returns the part of the log interval from t onwards. Times

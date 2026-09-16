@@ -45,7 +45,7 @@ func TestNumbersBetween(t *testing.T) {
 	b.health(4000, addrBoss, 80)
 	b.health(5000, addrBoss, 20)
 	tl := mustBuild(t, b.build(10000))
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	if boss.Lifetime != NewInterval(200*msec, 5*time.Second) {
 		t.Fatalf("lifetime = %v", boss.Lifetime)
 	}
@@ -328,7 +328,7 @@ func TestHealth(t *testing.T) {
 	b.hit(5000, addrP1, addrBoss, skillSlam, 1, evtc.ResultStrikeDamageNormal)
 	tl := mustBuild(t, b.build(10000))
 
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	if boss.Lifetime.Start != 100*msec {
 		t.Errorf("lifetime = %v", boss.Lifetime)
 	}

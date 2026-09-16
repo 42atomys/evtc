@@ -155,7 +155,7 @@ func (b *builder) cnt(a *Agent) *agentCounts { return &b.counts[a.idx] }
 
 // allAgents returns the agents plus the Unknown sentinel.
 func (b *builder) allAgents() []*Agent {
-	return append(slices.Clone(b.tl.Agents), b.tl.Unknown)
+	return append(slices.Clone(b.tl.agents), b.tl.Unknown)
 }
 
 // makeAgents creates one Agent per agent table entry plus the Unknown
@@ -170,7 +170,7 @@ func (b *builder) makeAgents() {
 		}
 	}
 	players := make([]Player, 0, nPlayers)
-	tl.Agents = make([]*Agent, len(l.Agents))
+	tl.agents = make([]*Agent, len(l.Agents))
 	tl.byAddr = make(map[uint64]*Agent, len(l.Agents)+1)
 	tl.alias = map[uint64]uint64{}
 	b.counts = make([]agentCounts, len(l.Agents)+1)
@@ -212,7 +212,7 @@ func (b *builder) makeAgents() {
 			a.SpeciesID = uint16(raw.Profession)
 			tl.npcs = append(tl.npcs, a)
 		}
-		tl.Agents[i] = a
+		tl.agents[i] = a
 		if _, dup := tl.byAddr[a.Addr]; !dup {
 			tl.byAddr[a.Addr] = a
 		}
@@ -322,7 +322,7 @@ func (b *builder) resolve(addr uint64) *Agent {
 	a := &Agent{Timeline: tl, Addr: addr, Kind: KindUnknown, Name: fmt.Sprintf("Unknown %x", addr), idx: len(b.counts)}
 	b.counts = append(b.counts, agentCounts{})
 	tl.byAddr[addr] = a
-	tl.Agents = append(tl.Agents, a)
+	tl.agents = append(tl.agents, a)
 	return a
 }
 
@@ -1666,7 +1666,7 @@ func (b *builder) finish() {
 		}
 	}
 	var foes []*Agent
-	for _, a := range tl.Agents {
+	for _, a := range tl.agents {
 		if b.cnt(a).fought && !slices.Contains(b.bosses, a) {
 			foes = append(foes, a)
 		}
@@ -1679,9 +1679,9 @@ func (b *builder) finish() {
 	for _, a := range foes {
 		targets = append(targets, Target{Agent: a})
 	}
-	tl.Targets = make([]*Target, len(targets))
+	tl.targets = make([]*Target, len(targets))
 	for i := range targets {
-		tl.Targets[i] = &targets[i]
+		tl.targets[i] = &targets[i]
 		targets[i].Agent.Target = &targets[i]
 	}
 

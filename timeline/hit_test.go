@@ -71,7 +71,7 @@ func TestPerAgent(t *testing.T) {
 	b.hit(1300, 0, addrBoss, skillSlam, 300, evtc.ResultStrikeDamageNormal)
 	b.hit(1400, addrBoss, addrP1, skillSlam, 500, evtc.ResultStrikeDamageNormal)
 	tl := mustBuild(t, b.build(10000))
-	p1, p2, boss, pet := tl.players[0], tl.players[1], tl.Targets[0], tl.Agent(addrPet)
+	p1, p2, boss, pet := tl.players[0], tl.players[1], tl.targets[0], tl.Agent(addrPet)
 
 	shares := boss.HitsTaken().PerAgent()
 	want := []struct {
@@ -129,7 +129,7 @@ func TestRankingsAndCredited(t *testing.T) {
 	b.hit(1400, addrBoss, addrP1, skillSlam, 500, evtc.ResultStrikeDamageNormal)
 	b.minionHit(1500, addrPet, addrAdd, instP1, skillHeat, 50)
 	tl := mustBuild(t, b.build(10000))
-	p1, p2, boss, pet, add := tl.players[0], tl.players[1], tl.Targets[0], tl.Agent(addrPet), tl.Agent(addrAdd)
+	p1, p2, boss, pet, add := tl.players[0], tl.players[1], tl.targets[0], tl.Agent(addrPet), tl.Agent(addrAdd)
 
 	credited := p1.HitsCredited()
 	if credited.Count() != 3 || credited.First().Time != time.Second || credited.Last().Time != 1500*msec || credited.On(boss).Damage() != 350 || p1.Hits().Count() != 1 {

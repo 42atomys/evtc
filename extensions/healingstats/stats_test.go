@@ -22,8 +22,8 @@ func TestOf(t *testing.T) {
 	if d := (decoder{}); d.Signature() != Signature || Signature != timeline.ExtensionHealingStats {
 		t.Errorf("decoder signature = %#x", d.Signature())
 	}
-	if len(s.Players) != 3 || len(s.Agents) != 5 || s.Unknown == nil || len(s.Recorded) != 1 {
-		t.Errorf("nodes: %d players, %d agents, %d recorded", len(s.Players), len(s.Agents), len(s.Recorded))
+	if s.Players().Count() != 3 || s.Agents().Count() != 5 || s.Unknown == nil || len(s.Recorded) != 1 {
+		t.Errorf("nodes: %d players, %d agents, %d recorded", s.Players().Count(), s.Agents().Count(), len(s.Recorded))
 	}
 	checkInvariants(t, s)
 }

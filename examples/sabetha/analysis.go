@@ -174,10 +174,8 @@ func addWaves(tl *timeline.Timeline) {
 	}
 	waves := map[uint16]*wave{}
 	var order []uint16
-	for _, t := range tl.Targets {
-		if t.Boss || !t.IsNPC() {
-			continue
-		}
+	adds := tl.Targets().Where(func(t *timeline.Target) bool { return !t.Boss && t.IsNPC() })
+	for t := range adds.Seq() {
 		wv := waves[t.SpeciesID]
 		if wv == nil {
 			wv = &wave{name: t.Name}
@@ -204,7 +202,7 @@ func addWaves(tl *timeline.Timeline) {
 
 func cannons(tl *timeline.Timeline) {
 	section("Cannons")
-	for _, g := range tl.Gadgets() {
+	for g := range tl.Gadgets().Seq() {
 		// Gadget ids are volatile, so cannons are found by name, as a
 		// French or an English client writes it.
 		name := strings.ToLower(g.Name)

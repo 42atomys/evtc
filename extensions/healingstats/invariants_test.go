@@ -29,15 +29,16 @@ func checkInvariants(tb testing.TB, s *Stats) {
 	if x == nil || x.Timeline != tl || x.Signature != Signature || x.Decoded != s || tl.Extension(Signature) != x || Of(tl) != s || s.Version != x.Version {
 		fail("stats are not attached to their extension: %+v", x)
 	}
-	if len(s.Agents) != len(tl.Agents) || len(s.byAgent) != len(tl.Agents)+1 {
-		fail("%d nodes for %d agents", len(s.Agents), len(tl.Agents))
+	agents := tl.Agents().All()
+	if len(s.agents) != len(agents) || len(s.byAgent) != len(agents)+1 {
+		fail("%d nodes for %d agents", len(s.agents), len(agents))
 	}
-	exact("agents", len(s.Agents), cap(s.Agents))
-	exact("players", len(s.Players), cap(s.Players))
+	exact("agents", len(s.agents), cap(s.agents))
+	exact("players", len(s.players), cap(s.players))
 	exact("recorded", len(s.Recorded), cap(s.Recorded))
 	exact("heals", len(s.heals), cap(s.heals))
-	for i, a := range s.Agents {
-		if a.Agent != tl.Agents[i] || a.Stats != s || s.byAgent[a.Agent] != a || s.Agent(a) != a || s.Agent(a.Agent) != a {
+	for i, a := range s.agents {
+		if a.Agent != agents[i] || a.Stats != s || s.byAgent[a.Agent] != a || s.Agent(a) != a || s.Agent(a.Agent) != a {
 			fail("node %d is inconsistent: %+v", i, a)
 		}
 	}
@@ -45,7 +46,7 @@ func checkInvariants(tb testing.TB, s *Stats) {
 		fail("unknown node is inconsistent: %+v", s.Unknown)
 	}
 	players := tl.Players().All()
-	for i, p := range s.Players {
+	for i, p := range s.players {
 		if p.Agent != players[i].Agent || s.Agent(players[i]) != p {
 			fail("player %d is %v, want %v", i, p, players[i])
 		}
@@ -160,7 +161,7 @@ func checkInvariants(tb testing.TB, s *Stats) {
 		fail("the recording player is not recorded")
 	}
 	j := 0
-	for _, p := range s.Players {
+	for _, p := range s.players {
 		if p.Recorded {
 			if j >= len(s.Recorded) || s.Recorded[j] != p {
 				fail("recorded players are not in table order: %v", s.Recorded)

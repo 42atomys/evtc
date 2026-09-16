@@ -55,26 +55,27 @@ func build(x *timeline.Extension) *Stats {
 // the Unknown sentinel.
 func (s *Stats) makeAgents() {
 	tl := s.Timeline
-	arena := make([]Agent, len(tl.Agents)+1)
-	s.Agents = make([]*Agent, len(tl.Agents))
+	count := tl.Agents().Count()
+	arena := make([]Agent, count+1)
+	s.agents = make([]*Agent, 0, count)
 	s.byAgent = make(map[*timeline.Agent]*Agent, len(arena))
-	for i, a := range tl.Agents {
-		n := &arena[i]
+	for a := range tl.Agents().Seq() {
+		n := &arena[len(s.agents)]
 		*n = Agent{Agent: a, Stats: s}
-		s.Agents[i] = n
+		s.agents = append(s.agents, n)
 		s.byAgent[a] = n
 	}
-	s.Unknown = &arena[len(tl.Agents)]
+	s.Unknown = &arena[count]
 	*s.Unknown = Agent{Agent: tl.Unknown, Stats: s}
 	s.byAgent[tl.Unknown] = s.Unknown
-	s.Players = make([]*Agent, 0, tl.Players().Count())
+	s.players = make([]*Agent, 0, tl.Players().Count())
 	for p := range tl.Players().Seq() {
-		s.Players = append(s.Players, s.byAgent[p.Agent])
+		s.players = append(s.players, s.byAgent[p.Agent])
 	}
 }
 
 // nodes returns every node, the Unknown one last.
-func (s *Stats) nodes() []*Agent { return append(slices.Clone(s.Agents), s.Unknown) }
+func (s *Stats) nodes() []*Agent { return append(slices.Clone(s.agents), s.Unknown) }
 
 // node returns the node of a timeline agent, the Unknown node for nil.
 func (s *Stats) node(a *timeline.Agent) *Agent {
@@ -140,7 +141,7 @@ func (s *Stats) merge() []record {
 // player: the flags name a side of the event and that side is the player
 // or one of its minions.
 func (s *Stats) local(e *evtc.Event, pov *timeline.Agent) bool {
-	src, dst := s.agents(e)
+	src, dst := s.parties(e)
 	return (e.IsOffcycle&flagFromSrc != 0 && credited(src) == pov) ||
 		(e.IsOffcycle&flagFromDst != 0 && credited(dst) == pov)
 }
@@ -152,7 +153,7 @@ func (s *Stats) local(e *evtc.Event, pov *timeline.Agent) bool {
 // is right. Such an address is resolved through the instance id at the
 // time of the record, as the timeline does for the state events arcdps
 // writes without a source.
-func (s *Stats) agents(e *evtc.Event) (src, dst *timeline.Agent) {
+func (s *Stats) parties(e *evtc.Event) (src, dst *timeline.Agent) {
 	t := s.Timeline.TimeOf(e)
 	return s.resolve(e.SrcAgent, e.SrcInstanceID, t), s.resolve(e.DstAgent, e.DstInstanceID, t)
 }
@@ -193,7 +194,7 @@ func (s *Stats) fill(recs []record) {
 	for i, r := range recs {
 		e := r.ev
 		h := &arena[i]
-		src, dst := s.agents(e)
+		src, dst := s.parties(e)
 		*h = Heal{
 			Event:        e,
 			PeerEvent:    r.peer,
@@ -294,13 +295,13 @@ func (s *Stats) finish() {
 		s.byAgent[pov.Agent].Recorded = true
 	}
 	n := 0
-	for _, p := range s.Players {
+	for _, p := range s.players {
 		if p.Recorded {
 			n++
 		}
 	}
 	s.Recorded = make([]*Agent, 0, n)
-	for _, p := range s.Players {
+	for _, p := range s.players {
 		if p.Recorded {
 			s.Recorded = append(s.Recorded, p)
 		}

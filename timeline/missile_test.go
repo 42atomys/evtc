@@ -20,7 +20,7 @@ func TestMissiles(t *testing.T) {
 	b.missileEffect(9100, addrP1, 999, 5000, 1)
 	b.missileRemove(9200, addrP1, skillSlam, 999, 0, false, Vec3{})
 	tl := mustBuild(t, b.build(10000))
-	p1, boss := tl.players[0], tl.Targets[0]
+	p1, boss := tl.players[0], tl.targets[0]
 	all := tl.Missiles().All()
 	if len(all) != 4 {
 		t.Fatalf("missiles = %d", len(all))

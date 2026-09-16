@@ -187,7 +187,7 @@ func TestEffectiveStacks(t *testing.T) {
 		t.Errorf("PerReceiver = %v", receivers)
 	}
 	appliers := tl.Stacks().PerApplier()
-	if len(appliers) != 2 || appliers[0].Agent != p2.Agent || appliers[1].Agent != tl.Targets[0].Agent || appliers[1].Stacks.Count() != 1 {
+	if len(appliers) != 2 || appliers[0].Agent != p2.Agent || appliers[1].Agent != tl.targets[0].Agent || appliers[1].Stacks.Count() != 1 {
 		t.Errorf("PerApplier = %v", appliers)
 	}
 	if r := tl.Stacks().Reverse().PerBuff(); r[0].Stacks.First().ID != 1 {
@@ -215,7 +215,7 @@ func TestBuffStacks(t *testing.T) {
 	b.buffApply(8000, addrP2, addrP2, skillBuff, 5000, 7)
 	tl := mustBuild(t, b.build(10000))
 
-	p1, p2, boss := tl.players[0], tl.players[1], tl.Targets[0]
+	p1, p2, boss := tl.players[0], tl.players[1], tl.targets[0]
 	if p1.Stacks().Count() != 5 || tl.Stacks().Count() != 6 || p2.StacksApplied().Count() != 5 || p2.Stacks().Count() != 1 {
 		t.Fatalf("stacks = %d total %d", p1.Stacks().Count(), tl.Stacks().Count())
 	}

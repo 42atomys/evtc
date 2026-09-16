@@ -44,7 +44,7 @@ func Example() {
 	if err != nil {
 		panic(err)
 	}
-	player, boss := tl.Players().First(), tl.Targets[0]
+	player, boss := tl.Players().First(), tl.Targets().First()
 
 	cast := player.Casts().First()
 	fmt.Println("cast:", cast.Skill.Name, cast.Interval, "completed:", cast.Completed())

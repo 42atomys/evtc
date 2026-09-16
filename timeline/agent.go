@@ -125,7 +125,7 @@ type Agent struct {
 	Name string
 	// Player is set when the agent is a player.
 	Player *Player
-	// Target is set when the agent is part of Timeline.Targets.
+	// Target is set when the agent is part of Timeline.Targets().
 	Target *Target
 	// Master is the owner of a minion (pet, clone, mech, turret), nil
 	// otherwise.

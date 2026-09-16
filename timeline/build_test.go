@@ -49,10 +49,10 @@ func TestAddressChangeEdgeCases(t *testing.T) {
 	b.add(evtc.Event{Time: b.at(2500), SrcAgent: addrP1, DstAgent: addrP1, IsStateChange: evtc.StateIIDChange})
 	tl := mustBuild(t, b.build(10000))
 
-	if len(tl.Agents) != 8 {
-		t.Fatalf("agents = %d", len(tl.Agents))
+	if len(tl.agents) != 8 {
+		t.Fatalf("agents = %d", len(tl.agents))
 	}
-	ghost := tl.Agents[7]
+	ghost := tl.agents[7]
 	if ghost.Hits().Count() != 2 || tl.Agent(0x9001) != ghost || tl.Agent(0x9002) != ghost || ghost.Addr != 0x9002 {
 		t.Errorf("ghost = %+v hits %d", ghost, ghost.Hits().Count())
 	}
@@ -148,8 +148,8 @@ func TestAddressChange(t *testing.T) {
 	tl := mustBuild(t, b.build(10000))
 
 	p1 := tl.players[0]
-	if p1.Hits().Count() != 2 || tl.Agent(old) != p1.Agent || len(tl.Agents) != 7 {
-		t.Errorf("hits %d agent %v agents %d", p1.Hits().Count(), tl.Agent(old), len(tl.Agents))
+	if p1.Hits().Count() != 2 || tl.Agent(old) != p1.Agent || len(tl.agents) != 7 {
+		t.Errorf("hits %d agent %v agents %d", p1.Hits().Count(), tl.Agent(old), len(tl.agents))
 	}
 	if p1.Lifetime != NewInterval(0, 2*time.Second) {
 		t.Errorf("lifetime = %v", p1.Lifetime)

@@ -151,7 +151,7 @@ func validateLog(t *testing.T, path string, tallies map[evtc.StateChange]*kindTa
 	if b := tl.Boss(); b != nil {
 		boss = b.Name
 	}
-	line = fmt.Sprintf("%-46s %8d events %6.2f%% covered %5dms %2d players %3d targets %-28s %s", name, events, 100*float64(covered)/float64(max(events, 1)), build.Milliseconds(), len(tl.players), len(tl.Targets), boss, strings.Join(dropped, ", "))
+	line = fmt.Sprintf("%-46s %8d events %6.2f%% covered %5dms %2d players %3d targets %-28s %s", name, events, 100*float64(covered)/float64(max(events, 1)), build.Milliseconds(), len(tl.players), len(tl.targets), boss, strings.Join(dropped, ", "))
 	if len(anomalies) > 0 {
 		line += "\n    anomalies: " + strings.Join(anomalies, "; ")
 	}
@@ -195,7 +195,7 @@ func referencedEvents(tl *Timeline) map[*evtc.Event]bool {
 			mark(me.Event)
 		}
 	}
-	for _, a := range append(slices.Clone(tl.Agents), tl.Unknown) {
+	for _, a := range append(slices.Clone(tl.agents), tl.Unknown) {
 		for _, d := range a.Downs {
 			mark(d.Event)
 		}
@@ -347,14 +347,14 @@ func smoke(t *testing.T, name string, tl *Timeline) {
 		boss.DeathsBy(tl.Unknown)
 		tl.TargetBySpeciesIDAt(boss.SpeciesID, tl.Duration/2)
 	}
-	for _, target := range tl.Targets {
+	for _, target := range tl.targets {
 		target.HitsTaken().Damage()
 		target.Life.Len()
 		for _, d := range target.Downs {
 			d.Interval.Duration()
 		}
 	}
-	for _, g := range tl.Gadgets() {
+	for g := range tl.Gadgets().Seq() {
 		g.IsNameVisibleAt(g.Lifetime.End)
 		g.NameVisibleTime(iv)
 	}
@@ -369,7 +369,7 @@ func smoke(t *testing.T, name string, tl *Timeline) {
 	tl.GroundMarkerAt(SquadArrow, tl.Duration/2)
 	tl.PingAt(tl.Duration / 2)
 	tl.Players().InSubgroup(1).Count()
-	tl.AgentsNamed("")
+	tl.Agents().Named("").Count()
 	tl.Since(tl.Duration / 2)
 	tl.ExtensionEvents().Count()
 	for _, x := range tl.Extensions {
@@ -431,7 +431,7 @@ func sanity(tl *Timeline) []string {
 		out = append(out, fmt.Sprintf("%d of %d hits from an unknown source", unknownHits, n))
 	}
 	badHealth := 0
-	for _, a := range tl.Agents {
+	for _, a := range tl.agents {
 		for _, smp := range a.Health.Samples() {
 			if smp.Value < 0 || smp.Value > 100 {
 				badHealth++

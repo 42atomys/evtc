@@ -41,7 +41,7 @@ func session(tl *timeline.Timeline) {
 		fmt.Printf("  %v at %v %v, removed %v\n", gm.Squad, gm.Position, gm.Interval, gm.Removed())
 	}
 	// A marker on an agent is drawn at the position of the agent.
-	for _, a := range tl.Agents {
+	for a := range tl.Agents().Seq() {
 		for _, m := range a.Markers {
 			if m.Squad != timeline.SquadNone {
 				fmt.Printf("  %v on %s %v, placed at %v\n", m.Squad, a.Name, m.Interval, a.PositionAt(m.Interval.Start))
@@ -189,12 +189,9 @@ func gadgets(tl *timeline.Timeline) {
 	section("Gadget animations and names")
 	// Every agent may carry animations and a name state, gadgets and the
 	// boss included; the busiest ones come first.
-	var agents []*timeline.Agent
-	for _, a := range tl.Agents {
-		if len(a.GadgetAnimations) > 0 || a.NameVisible.Len() > 0 {
-			agents = append(agents, a)
-		}
-	}
+	agents := tl.Agents().Where(func(a *timeline.Agent) bool {
+		return len(a.GadgetAnimations) > 0 || a.NameVisible.Len() > 0
+	}).All()
 	slices.SortStableFunc(agents, func(a, b *timeline.Agent) int {
 		return cmp.Compare(len(b.GadgetAnimations), len(a.GadgetAnimations))
 	})
@@ -234,7 +231,7 @@ func extensions(tl *timeline.Timeline) {
 	fmt.Printf("complete for %s; of the other players, only the heals exchanged with them are known\n", strings.Join(recorded, ", "))
 	w := table()
 	fmt.Fprintln(w, "player\theals\thealing\thps\tbarrier\tself\ton downed\treceived\trecorded")
-	for _, p := range h.Players {
+	for p := range h.Players().Seq() {
 		// HealsCredited includes the mech, pets and clones of the player.
 		heals := p.HealsCredited()
 		fmt.Fprintf(w, "%s\t%d\t%d\t%.0f\t%d\t%d\t%d\t%d\t%v\n", p.Name, heals.Count(), heals.Healed(), heals.HPS(tl.Interval()), heals.BarrierGiven(), heals.Self().Amount(), heals.Downed().Healed(), p.HealsTaken().Amount(), p.Recorded)

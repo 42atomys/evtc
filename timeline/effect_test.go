@@ -20,7 +20,7 @@ func TestEffects(t *testing.T) {
 	b.agentEffect(5000, 0, 5003, 103, 500)
 	b.effectRemove(9000, 0, evtc.StateEffectGroundRemove, 999)
 	tl := mustBuild(t, b.build(10000))
-	p1, p2, boss := tl.players[0], tl.players[1], tl.Targets[0]
+	p1, p2, boss := tl.players[0], tl.players[1], tl.targets[0]
 	all := tl.Effects().All()
 	if len(all) != 5 {
 		t.Fatalf("effects = %d", len(all))

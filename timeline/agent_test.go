@@ -140,7 +140,7 @@ func TestPointHelpers(t *testing.T) {
 	b.targetable(1000, addrBoss, true)
 	b.targetable(3000, addrBoss, false)
 	tl := mustBuild(t, b.build(10000))
-	p1, p2, boss := tl.players[0], tl.players[1], tl.Targets[0]
+	p1, p2, boss := tl.players[0], tl.players[1], tl.targets[0]
 	at := 1500 * msec
 
 	if p1.PositionAt(at) != (Vec3{50, 0, 0}) || p1.PositionAt(3*time.Second) != (Vec3{100, 0, 0}) {
@@ -211,7 +211,7 @@ func TestHealthHelpers(t *testing.T) {
 	b.health(5000, addrBoss, 20)
 	b.health(2000, addrP1, 50)
 	tl := mustBuild(t, b.build(10000))
-	boss, p1, p2 := tl.Targets[0], tl.players[0], tl.players[1]
+	boss, p1, p2 := tl.targets[0], tl.players[0], tl.players[1]
 
 	got := boss.HealthCrossings(66.6, 33.3)
 	want := []struct {
@@ -322,7 +322,7 @@ func TestLifeHelpers(t *testing.T) {
 	if p1.DeathsOf(nil) != nil || p1.DeathsOf(heat) != nil || p1.DeathsOfSkill(999) != nil {
 		t.Error("DeathsOf matched nothing but returned a slice")
 	}
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	var none *Target
 	if d := p1.DownsBy(boss); len(d) != 2 || d[0] != p1.Downs[0] || d[1] != p1.Downs[1] {
 		t.Errorf("DownsBy(boss) = %v", d)
@@ -358,7 +358,7 @@ func TestPhasesByHealth(t *testing.T) {
 	b.hit(9000, addrP1, addrBoss, skillSlam, 1, evtc.ResultStrikeDamageNormal)
 	b.health(2000, addrP1, 50)
 	tl := mustBuild(t, b.build(10000))
-	boss, p1 := tl.Targets[0], tl.players[0]
+	boss, p1 := tl.targets[0], tl.players[0]
 	life := boss.Lifetime
 	if life != NewInterval(200*msec, 9*time.Second) {
 		t.Fatalf("lifetime = %v", life)
@@ -397,7 +397,7 @@ func TestPhasesByBuff(t *testing.T) {
 	b.buffApply(0, addrP2, addrP1, skillBuff, 2000, 5)
 	b.buffRemoveSingle(2000, addrP1, 0, skillBuff, 0, 5, evtc.BuffRemoveSingle)
 	tl := mustBuild(t, b.build(10000))
-	boss, p1 := tl.Targets[0], tl.players[0]
+	boss, p1 := tl.targets[0], tl.players[0]
 
 	want := []Interval{NewInterval(200*msec, time.Second), NewInterval(4*time.Second, 6*time.Second), NewInterval(7*time.Second, 9*time.Second)}
 	if got := boss.PhasesByBuff(skillBuff); !slices.Equal(got, want) {
@@ -442,10 +442,10 @@ func TestUnknownAgents(t *testing.T) {
 	b.buffApply(1200, 0, addrP1, skillBuff, 1000, 1)
 	tl := mustBuild(t, b.build(10000))
 
-	if len(tl.Agents) != 8 {
-		t.Fatalf("agents = %d", len(tl.Agents))
+	if len(tl.agents) != 8 {
+		t.Fatalf("agents = %d", len(tl.agents))
 	}
-	ghost := tl.Agents[7]
+	ghost := tl.agents[7]
 	if ghost.Kind != KindUnknown || ghost.Addr != 0xabcd || ghost.Name != "Unknown abcd" || ghost.Raw != nil || tl.Agent(0xabcd) != ghost {
 		t.Errorf("ghost = %+v", ghost)
 	}
@@ -477,7 +477,7 @@ func TestAttackTargets(t *testing.T) {
 	if v, ok := at.Targetable.ValueAt(3 * time.Second); !ok || v {
 		t.Error("Targetable at 3s is true")
 	}
-	if len(tl.Targets) != 2 || tl.Targets[1].Agent != at {
-		t.Errorf("targets = %v", tl.Targets)
+	if len(tl.targets) != 2 || tl.targets[1].Agent != at {
+		t.Errorf("targets = %v", tl.targets)
 	}
 }

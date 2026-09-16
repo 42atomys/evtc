@@ -24,7 +24,7 @@ func TestStatesDownsDeaths(t *testing.T) {
 	b.state(7000, addrP2, evtc.StateChangeDead)
 	tl := mustBuild(t, b.build(10000))
 
-	p1, p2, boss := tl.players[0], tl.players[1], tl.Targets[0]
+	p1, p2, boss := tl.players[0], tl.players[1], tl.targets[0]
 	for _, tt := range []struct {
 		at   time.Duration
 		want LifeState

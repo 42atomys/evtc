@@ -53,7 +53,7 @@ func BenchmarkPositionAt(b *testing.B) {
 
 func BenchmarkHealthAt(b *testing.B) {
 	tl := benchLog(b)
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	b.ReportAllocs()
 	for i := 0; b.Loop(); i++ {
 		boss.Health.At(time.Duration(i%300) * time.Second)
@@ -89,7 +89,7 @@ func BenchmarkHitsBetween(b *testing.B) {
 
 func BenchmarkHitsFiltered(b *testing.B) {
 	tl := benchLog(b)
-	boss, p := tl.Targets[0], tl.players[0]
+	boss, p := tl.targets[0], tl.players[0]
 	b.ReportAllocs()
 	for b.Loop() {
 		boss.HitsTaken().By(p).Strikes().Damage()
@@ -98,7 +98,7 @@ func BenchmarkHitsFiltered(b *testing.B) {
 
 func BenchmarkCastsHits(b *testing.B) {
 	tl := benchLog(b)
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	iv := NewInterval(0, 60*time.Second)
 	b.ReportAllocs()
 	for b.Loop() {
@@ -127,7 +127,7 @@ func BenchmarkStacksUptime(b *testing.B) {
 
 func BenchmarkCrossings(b *testing.B) {
 	tl := benchLog(b)
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	b.ReportAllocs()
 	for b.Loop() {
 		boss.Health.Crossings(66.6, 33.3)
@@ -136,7 +136,7 @@ func BenchmarkCrossings(b *testing.B) {
 
 func BenchmarkGroupByDamage(b *testing.B) {
 	tl := benchLog(b)
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	b.ReportAllocs()
 	for b.Loop() {
 		for _, hits := range boss.HitsTaken().Landed().GroupBy(func(h *Hit) *Agent { return h.Src }) {
@@ -157,7 +157,7 @@ func BenchmarkEventsInvolving(b *testing.B) {
 
 func BenchmarkHitsAll(b *testing.B) {
 	tl := benchLog(b)
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	b.ReportAllocs()
 	for b.Loop() {
 		boss.HitsTaken().All()

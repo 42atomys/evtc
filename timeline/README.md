@@ -28,7 +28,7 @@ are rejected with `timeline.ErrLegacyLog`.
 
 | Node                                      | Reached from                                                        | Points to                                                                                                                                                         |
 | ----------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Timeline`                                | `Build`, `ParseFile`                                                | `Agents`, `Players()`, `Targets`, `Skills`, `Buffs`, `POV`, `Unknown`, the raw `Log`                                                                              |
+| `Timeline`                                | `Build`, `ParseFile`                                                | `Agents()`, `Players()`, `Targets()`, `Skills`, `Buffs`, `POV`, `Unknown`, the raw `Log`                                                                          |
 | `Agent` (`Player`, `Target` wrap it)      | `Timeline`, every node                                              | `Hits()`, `HitsCredited()`, `HitsTaken()`, `Casts()`, `Stacks()`, `StacksApplied()`, `Downs`, `Deaths`, `Breakbars`, `Master`, `Minions`, `Events()`              |
 | `Hit`                                     | `Hits` queries                                                      | `Src`, `Dst`, `Skill`, `Cast`, `Down`, `Death`, `Event`                                                                                                           |
 | `Cast`                                    | `Casts` queries                                                     | `Caster`, `Target`, `Skill`, `Hits()`, `Start`, `Stop`                                                                                                            |
@@ -66,7 +66,7 @@ whole log, `tl.Since(t)`, `tl.Until(t)`, `Around(t, d)` and
 `Interval.Split(times...)` build the usual sub-ranges. `tl.WallClock(t)`
 converts back to server time.
 
-`Targets` holds the boss of the log first, then every NPC or gadget that
+`Targets()` returns the boss of the log first, then every NPC or gadget that
 exchanged hits with the players. `tl.Unknown` is the sentinel agent behind
 hits and events whose source the log does not know; it is never nil.
 
@@ -75,13 +75,14 @@ hits and events whose source the log does not know; it is never nil.
 - **Read-only, concurrent.** The graph is built once in contiguous arenas
   and never mutated afterwards; a `Timeline` can be queried from any
   number of goroutines.
-- **Lazy queries.** `Players`, `Hits`, `Casts`, `Stacks` and `Events` compose
-  predicates; nothing is copied until `All`, `Map`, `GroupBy` or `PerAgent`
-  is called, and point lookups never allocate. `Skip`, `Limit` and `Reverse`
-  describe the traversal and apply after every filter of the chain,
-  wherever they appear: `Limit(3).Where(p)` yields at most three elements
-  accepted by `p`. `Reverse` flips the traversal, so `Reverse().Limit(3)`
-  keeps the three latest elements.
+- **Lazy queries.** `Agents`, `Players`, `Targets`, `Hits`, `Casts`,
+  `Stacks` and `Events` compose predicates; nothing is copied until `All`,
+  `Map`, `GroupBy` or `PerAgent` is called, and point lookups never
+  allocate. `Skip`, `Limit` and `Reverse` describe the traversal and apply
+  after every filter of the chain, wherever they appear:
+  `Limit(3).Where(p)` yields at most three elements accepted by `p`.
+  `Reverse` flips the traversal, so `Reverse().Limit(3)` keeps the three
+  latest elements.
 - **Missing values.** Point helpers (`PositionAt`, `HealthAt`, `FacingAt`,
   `BarrierAt`, `MaxHealthAt`, `DefiancePercentAt`) return the zero value
   when nothing is known at `t`: outside the lifetime or before the first

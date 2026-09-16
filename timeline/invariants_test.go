@@ -27,7 +27,7 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 			fail("%s: len %d, cap %d (scan count mismatch)", what, n, c)
 		}
 	}
-	agents := append(slices.Clone(tl.Agents), tl.Unknown)
+	agents := append(slices.Clone(tl.agents), tl.Unknown)
 	seenAgents := map[*Agent]bool{}
 	for _, a := range agents {
 		if seenAgents[a] {
@@ -576,12 +576,12 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 	}
 
 	seenTargets := map[*Agent]bool{}
-	for i, tg := range tl.Targets {
+	for i, tg := range tl.targets {
 		if tg.Agent == nil || tg.Agent.Target != tg || seenTargets[tg.Agent] {
 			fail("target %d is inconsistent: %+v", i, tg)
 		}
 		seenTargets[tg.Agent] = true
-		if tg.Boss && i > 0 && !tl.Targets[i-1].Boss {
+		if tg.Boss && i > 0 && !tl.targets[i-1].Boss {
 			fail("boss %v listed after a non-boss target", tg)
 		}
 	}
@@ -590,12 +590,12 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 			fail("player %v is inconsistent", p)
 		}
 	}
-	for _, a := range tl.NPCs() {
+	for a := range tl.NPCs().Seq() {
 		if a.Kind != KindNPC {
 			fail("%v listed as NPC", a)
 		}
 	}
-	for _, a := range tl.Gadgets() {
+	for a := range tl.Gadgets().Seq() {
 		if a.Kind != KindGadget {
 			fail("%v listed as gadget", a)
 		}
@@ -660,9 +660,9 @@ func TestInvariantsSynthetic(t *testing.T) {
 	} {
 		l := genLog(o)
 		tl := mustBuild(t, l)
-		t.Logf("seed %d: %d events, %d hits, %d casts, %d stacks, %d targets", o.seed, len(l.Events), tl.Hits().Count(), tl.Casts().Count(), tl.Stacks().Count(), len(tl.Targets))
+		t.Logf("seed %d: %d events, %d hits, %d casts, %d stacks, %d targets", o.seed, len(l.Events), tl.Hits().Count(), tl.Casts().Count(), tl.Stacks().Count(), len(tl.targets))
 		checkInvariants(t, tl)
-		if tl.Hits().Count() == 0 || tl.Casts().Count() == 0 || tl.Stacks().Count() == 0 || len(tl.Targets) == 0 {
+		if tl.Hits().Count() == 0 || tl.Casts().Count() == 0 || tl.Stacks().Count() == 0 || len(tl.targets) == 0 {
 			t.Errorf("seed %d generated an empty log", o.seed)
 		}
 	}
@@ -685,7 +685,7 @@ func TestQueriesAgainstBruteForce(t *testing.T) {
 	hits := tl.Hits().All()
 	casts := tl.Casts().All()
 	stacks := tl.Stacks().All()
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	p := tl.players[0]
 
 	for range 200 {

@@ -45,14 +45,14 @@ func TestBuildBasics(t *testing.T) {
 	if tl.POV != tl.players[0] {
 		t.Errorf("POV = %v", tl.POV)
 	}
-	if len(tl.Targets) != 2 || !tl.Targets[0].Boss || tl.Targets[0].SpeciesID != 15375 || tl.Targets[1].Name != "Crow" || tl.Targets[1].Boss {
-		t.Errorf("targets = %v", tl.Targets)
+	if len(tl.targets) != 2 || !tl.targets[0].Boss || tl.targets[0].SpeciesID != 15375 || tl.targets[1].Name != "Crow" || tl.targets[1].Boss {
+		t.Errorf("targets = %v", tl.targets)
 	}
-	if len(tl.NPCs()) != 3 || len(tl.Gadgets()) != 2 || len(tl.Agents) != 7 {
-		t.Errorf("npcs %d gadgets %d agents %d", len(tl.NPCs()), len(tl.Gadgets()), len(tl.Agents))
+	if tl.NPCs().Count() != 3 || tl.Gadgets().Count() != 2 || len(tl.agents) != 7 {
+		t.Errorf("npcs %d gadgets %d agents %d", tl.NPCs().Count(), tl.Gadgets().Count(), len(tl.agents))
 	}
-	boss := tl.Targets[0]
-	if tl.Agent(addrBoss) != boss.Agent || boss.Target != tl.Targets[0] || tl.Agent(0xdead) != nil {
+	boss := tl.targets[0]
+	if tl.Agent(addrBoss) != boss.Agent || boss.Target != tl.targets[0] || tl.Agent(0xdead) != nil {
 		t.Error("agent lookups are wrong")
 	}
 	if boss.Kind != KindNPC || !boss.IsNPC() || boss.Toughness != 100 || boss.InstanceID != instBoss {
@@ -116,8 +116,8 @@ func TestInstanceReuse(t *testing.T) {
 	if tl.AgentAt(999, time.Second) != nil {
 		t.Error("an unknown instance id resolved")
 	}
-	if len(tl.Targets) != 3 || tl.Targets[1] != add.Target || tl.Targets[2] != add2.Target {
-		t.Errorf("targets = %v", tl.Targets)
+	if len(tl.targets) != 3 || tl.targets[1] != add.Target || tl.targets[2] != add2.Target {
+		t.Errorf("targets = %v", tl.targets)
 	}
 }
 
@@ -133,8 +133,8 @@ func TestBossFallbackAndNoCombatStart(t *testing.T) {
 	if tl.epoch != rawEpoch+5000 || tl.Duration != time.Second || !tl.Start.IsZero() {
 		t.Errorf("epoch %d duration %v start %v", tl.epoch, tl.Duration, tl.Start)
 	}
-	if len(tl.Targets) != 1 || !tl.Targets[0].Boss || tl.Targets[0].Name != "Sabetha" {
-		t.Errorf("targets = %v", tl.Targets)
+	if len(tl.targets) != 1 || !tl.targets[0].Boss || tl.targets[0].Name != "Sabetha" {
+		t.Errorf("targets = %v", tl.targets)
 	}
 	if tl.Skill(skillSlam).Name != "200" || tl.Skill(skillSlam).Custom {
 		t.Errorf("unnamed skill = %+v", tl.Skill(skillSlam))
@@ -144,7 +144,7 @@ func TestBossFallbackAndNoCombatStart(t *testing.T) {
 	}
 
 	empty := mustBuild(t, &evtc.Log{Header: evtc.Header{Build: "20260816", Revision: 1}})
-	if len(empty.Agents) != 0 || empty.Duration != 0 || empty.Hits().Count() != 0 || len(empty.Targets) != 0 {
+	if len(empty.agents) != 0 || empty.Duration != 0 || empty.Hits().Count() != 0 || len(empty.targets) != 0 {
 		t.Error("an empty log built a non-empty timeline")
 	}
 }
@@ -168,10 +168,10 @@ func TestNilEntities(t *testing.T) {
 	if tl.Events().Involving(player).Any() || player.Ref() != nil || target.Ref() != nil {
 		t.Error("nil entities matched events")
 	}
-	if len(tl.Targets[0].Breakbars) != 0 {
+	if len(tl.targets[0].Breakbars) != 0 {
 		t.Error("unexpected breakbars")
 	}
-	if tl.Hits().By(tl.players[0]).Count() != 1 || tl.Hits().On(tl.Targets[0]).Count() != 1 {
+	if tl.Hits().By(tl.players[0]).Count() != 1 || tl.Hits().On(tl.targets[0]).Count() != 1 {
 		t.Error("non-nil entities did not match")
 	}
 }
@@ -188,7 +188,7 @@ func TestEdgeQueries(t *testing.T) {
 	b.hit(2600, addrP2, addrBoss, skillHeat, 50, evtc.ResultDefianceDamageNormal)
 	b.defianceState(3000, addrBoss, DefianceRecover)
 	tl := mustBuild(t, b.build(10000))
-	p1, boss := tl.players[0], tl.Targets[0]
+	p1, boss := tl.players[0], tl.targets[0]
 
 	c := p1.Casts().First()
 	if c == nil || c.Hits().Count() != 2 || c.Hits().Crits().Count() != 1 || c.Hits().Damage() != 150 || c.Hits().First().Cast != c {
@@ -226,14 +226,14 @@ func TestTimelineLookups(t *testing.T) {
 	p1, p2 := tl.players[0], tl.players[1]
 	add1, add2 := tl.Agent(addrAdd).Target, tl.Agent(addrAdd2).Target
 
-	if boss := tl.Boss(); boss == nil || boss != tl.Targets[0] || !boss.Boss || boss.SpeciesID != 15375 {
+	if boss := tl.Boss(); boss == nil || boss != tl.targets[0] || !boss.Boss || boss.SpeciesID != 15375 {
 		t.Errorf("Boss = %v", tl.Boss())
 	}
 	if tl.TargetBySpeciesID(1083) != add1 || tl.TargetBySpeciesID(15375) != tl.Boss() || tl.TargetBySpeciesID(4242) != nil {
 		t.Errorf("TargetBySpeciesID = %v", tl.TargetBySpeciesID(1083))
 	}
-	if all := tl.TargetsBySpeciesID(1083); len(all) != 2 || all[0] != add1 || all[1] != add2 || tl.TargetsBySpeciesID(4242) != nil {
-		t.Errorf("TargetsBySpeciesID = %v", all)
+	if all := tl.Targets().OfSpecies(1083).All(); len(all) != 2 || all[0] != add1 || all[1] != add2 || tl.Targets().OfSpecies(4242).Any() {
+		t.Errorf("OfSpecies = %v", all)
 	}
 	for _, tt := range []struct {
 		at   time.Duration
@@ -259,8 +259,32 @@ func TestTimelineLookups(t *testing.T) {
 	if g := tl.Players().InSubgroup(1); g.Count() != 1 || g.First() != p1 || tl.Players().InSubgroup(2).Count() != 1 || tl.Players().InSubgroup(3).Any() {
 		t.Errorf("InSubgroup(1) = %v", g.All())
 	}
-	if named := tl.AgentsNamed("Crow"); len(named) != 2 || named[0] != add1.Agent || named[1] != add2.Agent || tl.AgentsNamed("Nobody") != nil {
-		t.Errorf("AgentsNamed = %v", named)
+	if named := tl.Agents().Named("Crow").All(); len(named) != 2 || named[0] != add1.Agent || named[1] != add2.Agent || tl.Agents().Named("Nobody").Any() {
+		t.Errorf("Named = %v", named)
+	}
+	agents := tl.Agents()
+	if agents.OfKind(KindPlayer).Count() != 2 || agents.OfKind(KindGadget).Count() != 2 || agents.OfSpecies(1083).Count() != 2 || agents.OfSpecies(0).Count() != 1 || agents.OfSpecies(0).First().Name != "at3001-7307" {
+		t.Errorf("agent filters: %d players, %d gadgets", agents.OfKind(KindPlayer).Count(), agents.OfKind(KindGadget).Count())
+	}
+	if agents.Reverse().First() != add2.Agent || agents.Skip(2).First() != tl.Boss().Agent || agents.Limit(3).Count() != 3 || agents.GroupBy((*Agent).IsNPC)[true].Count() != 4 {
+		t.Errorf("agent traversal: last %v", agents.Reverse().First())
+	}
+	if agents.AliveAt(5500*msec).Where(func(a *Agent) bool { return a == add2.Agent }).Count() != 1 || agents.AliveAt(-time.Second).Any() {
+		t.Error("Agents.AliveAt is wrong")
+	}
+	players := tl.Players()
+	if players.OfProfession(ProfessionWarrior).First() != p2 || players.OfEliteSpec(65).First() != p2 || players.OfEliteSpec(EliteNone).First() != p1 || players.AliveAt(1500*msec).First() != p1 || players.AliveAt(-time.Second).Any() {
+		t.Error("player filters are wrong")
+	}
+	if players.Reverse().First() != p2 || players.Skip(1).First() != p2 || players.Limit(1).Count() != 1 || players.GroupBy(func(p *Player) int { return p.Subgroup })[2].First() != p2 {
+		t.Error("player traversal is wrong")
+	}
+	targets := tl.Targets()
+	if targets.Reverse().First() != add2 || targets.Skip(1).Limit(1).First() != add1 || targets.Reverse().GroupBy(func(tg *Target) uint16 { return tg.SpeciesID })[1083].First() != add1 {
+		t.Error("target traversal is wrong")
+	}
+	if targets.AliveAt(5500*msec).Where(func(tg *Target) bool { return tg == add2 }).Count() != 1 || targets.AliveAt(-time.Second).Any() {
+		t.Error("Targets.AliveAt is wrong")
 	}
 
 	for _, tt := range []struct{ got, want Interval }{
@@ -287,8 +311,8 @@ func TestNoBoss(t *testing.T) {
 	b.hit(1000, addrP1, addrAdd, skillSlam, 1, evtc.ResultStrikeDamageNormal)
 	tl := mustBuild(t, b.build(2000))
 
-	if tl.Boss() != nil || len(tl.Targets) != 1 || tl.Targets[0].Boss || tl.TargetBySpeciesID(1083) != tl.Targets[0] {
-		t.Errorf("Boss = %v targets %v", tl.Boss(), tl.Targets)
+	if tl.Boss() != nil || len(tl.targets) != 1 || tl.targets[0].Boss || tl.TargetBySpeciesID(1083) != tl.targets[0] {
+		t.Errorf("Boss = %v targets %v", tl.Boss(), tl.targets)
 	}
 	checkInvariants(t, tl)
 }

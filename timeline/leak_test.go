@@ -28,9 +28,9 @@ func TestBuildReleasesMemory(t *testing.T) {
 	}
 	// Exercise the queries too, so that any cache they might keep is
 	// included in the measurement.
-	tl.Targets[0].Casts().Hits().Blocked().Count()
+	tl.targets[0].Casts().Hits().Blocked().Count()
 	tl.players[0].Stacks().Uptime(tl.Interval())
-	tl.Targets[0].Health.Crossings(50)
+	tl.targets[0].Health.Crossings(50)
 	withGraph := heapLive()
 	runtime.KeepAlive(tl)
 	graph := int64(withGraph) - int64(base)
@@ -62,7 +62,7 @@ func TestBuildStartsNoGoroutine(t *testing.T) {
 // race detector validates the read-only claim.
 func TestConcurrentQueries(t *testing.T) {
 	tl := mustBuild(t, genLog(genOptions{players: 8, adds: 6, duration: 60 * time.Second, seed: 11}))
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	var wg sync.WaitGroup
 	for g := range 8 {
 		wg.Add(1)

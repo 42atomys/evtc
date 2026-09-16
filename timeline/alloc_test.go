@@ -11,7 +11,7 @@ import (
 // allocate it.
 func TestQueryAllocations(t *testing.T) {
 	tl := mustBuild(t, genLog(genOptions{players: 8, adds: 6, duration: 60 * time.Second, seed: 5}))
-	boss, p := tl.Targets[0], tl.players[0]
+	boss, p := tl.targets[0], tl.players[0]
 	iv := NewInterval(10*time.Second, 20*time.Second)
 	at := 15 * time.Second
 	var sink int
@@ -85,13 +85,13 @@ func TestQueryAllocations(t *testing.T) {
 		{"PlayerByAccount", 0, func() { tl.PlayerByAccount(p.Account) }},
 		{"Since", 0, func() { tl.Since(at) }},
 		{"IsAirborneAt", 0, func() { p.IsAirborneAt(at) }},
-		{"IsNameVisibleAt", 0, func() { tl.Gadgets()[0].IsNameVisibleAt(at) }},
+		{"IsNameVisibleAt", 0, func() { tl.Gadgets().First().IsNameVisibleAt(at) }},
 		{"ExtensionEvents.Count", 1, func() { sink = tl.ExtensionEvents().Count() }},
 		{"Extension.Events.Count", 0, func() { sink = tl.Extensions[0].Events().Count() }},
 		{"Extension", 0, func() { tl.Extension(0x9c9b3c99) }},
 		{"ExtensionOf", 0, func() { tl.ExtensionOf(tl.Extensions[0].Events().First()) }},
 		{"Events.By.Count", 2, func() { sink = tl.Extensions[0].Events().By(p).Count() }},
-		{"NameVisibleTime", 0, func() { tl.Gadgets()[0].NameVisibleTime(iv) }},
+		{"NameVisibleTime", 0, func() { tl.Gadgets().First().NameVisibleTime(iv) }},
 		{"Cast.Hits.Count", 0, func() {
 			if c := boss.Casts().First(); c != nil {
 				sink = c.Hits().Count()

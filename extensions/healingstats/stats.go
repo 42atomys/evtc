@@ -38,11 +38,6 @@ type Stats struct {
 	// registration event; SupportedRevision is the one this package
 	// decodes.
 	Revision int
-	// Agents holds one node per agent of the timeline, in the order of
-	// Timeline.Agents.
-	Agents []*Agent
-	// Players holds the players, in the order of Timeline.Players().
-	Players []*Agent
 	// Unknown is the node of the Unknown sentinel of the timeline: the
 	// source of the heals whose source the log does not know.
 	Unknown *Agent
@@ -56,6 +51,8 @@ type Stats struct {
 	// merged into one heal.
 	Merged int
 
+	agents  []*Agent
+	players []*Agent
 	heals   []*Heal
 	byAgent map[*timeline.Agent]*Agent
 }
@@ -93,6 +90,24 @@ func (s *Stats) Heals() Heals {
 		return Heals{}
 	}
 	return Heals{timeline.From(s.heals)}
+}
+
+// Agents returns one node per agent of the timeline, in the order of
+// Timeline.Agents.
+func (s *Stats) Agents() Agents {
+	if s == nil {
+		return Agents{}
+	}
+	return Agents{timeline.From(s.agents)}
+}
+
+// Players returns the nodes of the players, in the order of
+// Timeline.Players.
+func (s *Stats) Players() Agents {
+	if s == nil {
+		return Agents{}
+	}
+	return Agents{timeline.From(s.players)}
 }
 
 // Agent returns the node of an agent of the timeline, nil for a nil

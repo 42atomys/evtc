@@ -48,7 +48,7 @@ func TestCastsAndHits(t *testing.T) {
 	b.castStart(9000, addrP2, addrBoss, skillSlam, 100, 100)
 	tl := mustBuild(t, b.build(10000))
 
-	boss, p1, p2 := tl.Targets[0], tl.players[0], tl.players[1]
+	boss, p1, p2 := tl.targets[0], tl.players[0], tl.players[1]
 	casts := boss.Casts()
 	if casts.Count() != 2 || tl.Casts().Count() != 4 || tl.Skill(skillHeat).Casts().Count() != 2 {
 		t.Fatalf("casts = %d, total %d", casts.Count(), tl.Casts().Count())

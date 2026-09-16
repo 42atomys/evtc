@@ -93,7 +93,7 @@ func phases(tl *timeline.Timeline) {
 func champions(tl *timeline.Timeline) {
 	section("Champions")
 	for _, species := range []uint16{kernan, knuckles, karde} {
-		for _, add := range tl.TargetsBySpeciesID(species) {
+		for add := range tl.Targets().OfSpecies(species).Seq() {
 			// An NPC that dies has a death; one that despawns only has
 			// the end of its lifetime.
 			end, died := add.DiedAt()

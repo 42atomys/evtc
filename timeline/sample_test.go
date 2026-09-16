@@ -14,7 +14,7 @@ import (
 // skipped when it is absent.
 const samplePath = "../tests_fixtures/sabetha-05-fd9b6f3a.zevtc"
 
-// Players of the sample log, by their table index.
+// Players of the sample log, by their index in Timeline.Players().
 const (
 	sampleKilled = 3 // killed outright at 39.6s
 	sampleDowned = 5 // target of the first heat cast, downed twice, dead at the end
@@ -42,12 +42,12 @@ func TestSampleOverview(t *testing.T) {
 	if len(tl.players) != 10 || tl.POV == nil || tl.POV != tl.players[0] || tl.POV.Subgroup != 2 {
 		t.Errorf("players %d pov %v", len(tl.players), tl.POV)
 	}
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	if !boss.Boss || boss.SpeciesID != 15375 || boss.Name != "Sabetha la saboteuse" || boss.Toughness != 1374 {
 		t.Errorf("boss = %+v", boss.Agent)
 	}
-	if len(tl.Targets) < 10 || len(tl.NPCs()) != 260 || len(tl.Gadgets()) != 183 || len(tl.Agents) != 453 {
-		t.Errorf("targets %d npcs %d gadgets %d agents %d", len(tl.Targets), len(tl.NPCs()), len(tl.Gadgets()), len(tl.Agents))
+	if len(tl.targets) < 10 || tl.NPCs().Count() != 260 || tl.Gadgets().Count() != 183 || len(tl.agents) != 453 {
+		t.Errorf("targets %d npcs %d gadgets %d agents %d", len(tl.targets), tl.NPCs().Count(), tl.Gadgets().Count(), len(tl.agents))
 	}
 	if tl.Hits().Count() != 15442 || tl.Stacks().Count() != 38258+407 || tl.Casts().Count() < 5495 {
 		t.Errorf("hits %d stacks %d casts %d", tl.Hits().Count(), tl.Stacks().Count(), tl.Casts().Count())
@@ -62,7 +62,7 @@ func TestSampleOverview(t *testing.T) {
 		t.Errorf("boss max health = %v, %v", v, ok)
 	}
 	minions, attackTargets := 0, 0
-	for _, a := range tl.Agents {
+	for _, a := range tl.agents {
 		switch {
 		case a.Master == nil:
 		case a.Master.Player != nil:
@@ -80,7 +80,7 @@ func TestSampleOverview(t *testing.T) {
 		t.Errorf("minions %d attack targets %d", minions, attackTargets)
 	}
 	agents906 := 0
-	for _, a := range tl.Agents {
+	for _, a := range tl.agents {
 		if a.InstanceID == 906 {
 			agents906++
 		}
@@ -92,7 +92,7 @@ func TestSampleOverview(t *testing.T) {
 
 func TestSampleHealthCrossings(t *testing.T) {
 	tl := loadSample(t)
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 
 	cs := boss.Health.Crossings(66.6, 33.3)
 	var down66, down33 *Crossing[float64]
@@ -124,7 +124,7 @@ func TestSampleHealthCrossings(t *testing.T) {
 
 func TestSampleCastsAndHits(t *testing.T) {
 	tl := loadSample(t)
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	target, other := tl.players[sampleDowned], tl.players[sampleMoving]
 
 	casts := boss.Casts().OfSkill(31390).Between(NewInterval(6*time.Second, 7*time.Second))
@@ -178,7 +178,7 @@ func TestSampleDownsAndDeaths(t *testing.T) {
 	if de.Time != 315023*msec || de.Down != downed.Downs[1] || de.Cause == nil || de.Cause.Src != tl.Unknown || de.Cause.Skill.Name != "Kill" {
 		t.Errorf("death = %+v cause %+v", de, de.Cause)
 	}
-	if len(killed.Deaths) != 1 || killed.Deaths[0].Time != 39590*msec || killed.Deaths[0].Down != nil || killed.Deaths[0].Cause.Src != tl.Targets[0].Agent || len(killed.Downs) != 0 {
+	if len(killed.Deaths) != 1 || killed.Deaths[0].Time != 39590*msec || killed.Deaths[0].Down != nil || killed.Deaths[0].Cause.Src != tl.targets[0].Agent || len(killed.Downs) != 0 {
 		t.Errorf("outright death = %+v", killed.Deaths)
 	}
 	if v, _ := downed.InCombat.ValueAt(100 * time.Second); !v {
@@ -207,7 +207,7 @@ func TestSamplePositions(t *testing.T) {
 	if pos, ok := p.Position.At(242 * msec); !ok || !near(pos, want) {
 		t.Errorf("position at 242ms = %v, want %v", pos, want)
 	}
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	if boss.Facing.Len() != 229 || boss.Position.Len() != 13+11 {
 		t.Errorf("boss facing %d positions %d", boss.Facing.Len(), boss.Position.Len())
 	}
@@ -255,7 +255,7 @@ func TestSampleBuffs(t *testing.T) {
 func TestSampleBreakbars(t *testing.T) {
 	tl := loadSample(t)
 	var knuckles *Agent
-	for _, a := range tl.NPCs() {
+	for a := range tl.NPCs().Seq() {
 		if a.SpeciesID == 15404 {
 			knuckles = a
 		}
@@ -299,7 +299,7 @@ func BenchmarkBuildSample(b *testing.B) {
 
 func BenchmarkQuerySample(b *testing.B) {
 	tl := loadSample(b)
-	boss := tl.Targets[0]
+	boss := tl.targets[0]
 	target := tl.players[sampleDowned]
 	iv := NewInterval(6*time.Second, 7*time.Second)
 	b.ReportAllocs()

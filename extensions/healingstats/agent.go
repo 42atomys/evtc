@@ -1,6 +1,10 @@
 package healingstats
 
-import "github.com/42atomys/evtc/timeline"
+import (
+	"slices"
+
+	"github.com/42atomys/evtc/timeline"
+)
 
 // Agent is the node of one agent of the timeline in the healing graph. It
 // embeds the timeline agent, so that every field and method of the
@@ -57,4 +61,42 @@ func (a *Agent) HealsTaken() Heals {
 		return Heals{}
 	}
 	return Heals{timeline.From(a.healsTaken)}
+}
+
+// Agents is a query over agent nodes in table order.
+type Agents struct{ timeline.Query[Agent] }
+
+// Where keeps the agents accepted by p.
+func (q Agents) Where(p func(*Agent) bool) Agents { return Agents{q.Query.Where(p)} }
+
+// Skip drops the first n agents of the traversal.
+func (q Agents) Skip(n int) Agents {
+	q.Query = q.Query.Skip(n)
+	return q
+}
+
+// Limit stops the traversal after n agents.
+func (q Agents) Limit(n int) Agents {
+	q.Query = q.Query.Limit(n)
+	return q
+}
+
+// Reverse traverses the agents from the last in table order to the first.
+func (q Agents) Reverse() Agents {
+	q.Query = q.Query.Reverse()
+	return q
+}
+
+// GroupBy partitions the matching agents by the key returned by f. Each
+// group is in table order.
+func (q Agents) GroupBy[K comparable](f func(*Agent) K) map[K]Agents {
+	groups := q.Query.GroupBy(f)
+	out := make(map[K]Agents, len(groups))
+	for k, items := range groups {
+		if q.Reversed() {
+			slices.Reverse(items)
+		}
+		out[k] = Agents{timeline.From(items)}
+	}
+	return out
 }

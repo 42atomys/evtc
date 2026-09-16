@@ -30,11 +30,11 @@ Nothing else changes for a program that does not import it.
 
 ## The model
 
-| Node                               | Reached from        | Points to                                                                                                                          |
-| ---------------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `Stats`                            | `Of(tl)`            | `Heals()`, `Agents`, `Players`, `Unknown`, `Recorded`, `Agent(entity)`, `Timeline`, `Extension`, `Version`, `Revision`, `Merged`   |
-| `Agent` (embeds `*timeline.Agent`) | `Stats`, every heal | `Heals()`, `HealsCredited()`, `HealsTaken()`, `Recorded`, `Stats`, and everything a timeline agent has                             |
-| `Heal`                             | `Heals` queries     | `Src`, `Dst`, `Skill`, `Cast`, `Amount`, `IsBarrier`, `IsBuff`, `TargetDowned`, `SrcRecorded`, `DstRecorded`, `Event`, `PeerEvent` |
+| Node                               | Reached from        | Points to                                                                                                                            |
+| ---------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `Stats`                            | `Of(tl)`            | `Heals()`, `Agents()`, `Players()`, `Unknown`, `Recorded`, `Agent(entity)`, `Timeline`, `Extension`, `Version`, `Revision`, `Merged` |
+| `Agent` (embeds `*timeline.Agent`) | `Stats`, every heal | `Heals()`, `HealsCredited()`, `HealsTaken()`, `Recorded`, `Stats`, and everything a timeline agent has                               |
+| `Heal`                             | `Heals` queries     | `Src`, `Dst`, `Skill`, `Cast`, `Amount`, `IsBarrier`, `IsBuff`, `TargetDowned`, `SrcRecorded`, `DstRecorded`, `Event`, `PeerEvent`   |
 
 An `Agent` node exists for every agent of the timeline, so `h.Agent(p)` is
 never nil for a player, target or agent of `tl`. The node embeds the
