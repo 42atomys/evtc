@@ -20,7 +20,7 @@ func TestMissiles(t *testing.T) {
 	b.missileEffect(9100, addrP1, 999, 5000, 1)
 	b.missileRemove(9200, addrP1, skillSlam, 999, 0, false, Vec3{})
 	tl := mustBuild(t, b.build(10000))
-	p1, boss := tl.Players[0], tl.Targets[0]
+	p1, boss := tl.players[0], tl.Targets[0]
 	all := tl.Missiles().All()
 	if len(all) != 4 {
 		t.Fatalf("missiles = %d", len(all))
@@ -45,7 +45,7 @@ func TestMissiles(t *testing.T) {
 	if p1.Missiles().Count() != 1 || q.By(boss).Count() != 2 || q.By(nil).Count() != 0 || q.OfSkill(skillHeat).Count() != 3 || q.Of(tl.Skill(skillSlam)).Count() != 1 || q.At(1200*msec).Count() != 1 || q.Between(NewInterval(2400*msec, 2600*msec)).Count() != 2 {
 		t.Error("missile filters are wrong")
 	}
-	if shares := q.PerSkill(); len(shares) != 2 || shares[0].Skill != tl.Skill(skillHeat) || shares[0].Missiles.Count() != 3 || shares[1].Missiles.First() != m0 || q.Reverse().Limit(1).First() != m3 || tl.Players[1].Missiles().PerSkill() != nil {
+	if shares := q.PerSkill(); len(shares) != 2 || shares[0].Skill != tl.Skill(skillHeat) || shares[0].Missiles.Count() != 3 || shares[1].Missiles.First() != m0 || q.Reverse().Limit(1).First() != m3 || tl.players[1].Missiles().PerSkill() != nil {
 		t.Error("missile rankings are wrong")
 	}
 	if groups := q.GroupBy(func(m *Missile) *Agent { return m.Owner }); len(groups) != 3 || groups[boss.Agent].Count() != 2 || q.Skip(3).First() != m3 {

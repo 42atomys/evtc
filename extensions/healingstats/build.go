@@ -67,9 +67,9 @@ func (s *Stats) makeAgents() {
 	s.Unknown = &arena[len(tl.Agents)]
 	*s.Unknown = Agent{Agent: tl.Unknown, Stats: s}
 	s.byAgent[tl.Unknown] = s.Unknown
-	s.Players = make([]*Agent, len(tl.Players))
-	for i, p := range tl.Players {
-		s.Players[i] = s.byAgent[p.Agent]
+	s.Players = make([]*Agent, 0, tl.Players().Count())
+	for p := range tl.Players().Seq() {
+		s.Players = append(s.Players, s.byAgent[p.Agent])
 	}
 }
 

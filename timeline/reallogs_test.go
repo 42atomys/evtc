@@ -151,7 +151,7 @@ func validateLog(t *testing.T, path string, tallies map[evtc.StateChange]*kindTa
 	if b := tl.Boss(); b != nil {
 		boss = b.Name
 	}
-	line = fmt.Sprintf("%-46s %8d events %6.2f%% covered %5dms %2d players %3d targets %-28s %s", name, events, 100*float64(covered)/float64(max(events, 1)), build.Milliseconds(), len(tl.Players), len(tl.Targets), boss, strings.Join(dropped, ", "))
+	line = fmt.Sprintf("%-46s %8d events %6.2f%% covered %5dms %2d players %3d targets %-28s %s", name, events, 100*float64(covered)/float64(max(events, 1)), build.Milliseconds(), len(tl.players), len(tl.Targets), boss, strings.Join(dropped, ", "))
 	if len(anomalies) > 0 {
 		line += "\n    anomalies: " + strings.Join(anomalies, "; ")
 	}
@@ -293,7 +293,7 @@ func smoke(t *testing.T, name string, tl *Timeline) {
 	}()
 	iv := tl.Interval()
 	instants := []time.Duration{0, tl.Duration / 3, tl.Duration / 2, tl.Duration, tl.Duration + time.Second, -time.Second}
-	for _, p := range tl.Players {
+	for _, p := range tl.players {
 		for _, at := range instants {
 			p.PositionAt(at)
 			p.HealthAt(at)
@@ -328,8 +328,8 @@ func smoke(t *testing.T, name string, tl *Timeline) {
 		p.Spec()
 		p.GlidingTime(iv)
 		p.AirborneTime(iv)
-		if len(tl.Players) > 1 {
-			p.DistanceTo(tl.Players[0], tl.Duration/2)
+		if len(tl.players) > 1 {
+			p.DistanceTo(tl.players[0], tl.Duration/2)
 		}
 	}
 	if boss := tl.Boss(); boss != nil {
@@ -399,7 +399,7 @@ func sanity(tl *Timeline) []string {
 	if tl.POV == nil {
 		out = append(out, "no point of view")
 	}
-	if len(tl.Players) == 0 {
+	if len(tl.players) == 0 {
 		out = append(out, "no players")
 	}
 	if tl.Duration <= 0 {
@@ -445,7 +445,7 @@ func sanity(tl *Timeline) []string {
 		out = append(out, fmt.Sprintf("%d health samples outside 0..100", badHealth))
 	}
 	noCause := 0
-	for _, p := range tl.Players {
+	for _, p := range tl.players {
 		for _, d := range p.Deaths {
 			if d.Cause == nil {
 				noCause++
@@ -466,7 +466,7 @@ func sanity(tl *Timeline) []string {
 		out = append(out, fmt.Sprintf("%d map changes, %d rewards, %d integrity messages", len(tl.MapChanges), len(tl.Rewards), len(tl.Integrity)))
 	}
 	jumps := 0
-	for _, p := range tl.Players {
+	for _, p := range tl.players {
 		jumps += p.Airborne.Len()
 	}
 	if jumps > 0 {

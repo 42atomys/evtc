@@ -202,7 +202,7 @@ func (b *builder) makeAgents() {
 				EliteSpec:  EliteSpec(raw.IsElite),
 			})
 			a.Player = &players[len(players)-1]
-			tl.Players = append(tl.Players, a.Player)
+			tl.players = append(tl.players, a.Player)
 		case raw.Profession>>16 == 0xffff:
 			a.Kind = KindGadget
 			a.SpeciesID = uint16(raw.Profession)

@@ -35,7 +35,7 @@ func TestMarkers(t *testing.T) {
 	b.move(6000, addrP1, evtc.StatePosition, 1, 2, 3)
 	b.move(6000, addrP2, evtc.StatePosition, 1, 2, 3)
 	tl := mustBuild(t, b.build(8000))
-	p1, p2, boss := tl.Players[0], tl.Players[1], tl.Boss()
+	p1, p2, boss := tl.players[0], tl.players[1], tl.Boss()
 
 	if len(p1.Markers) != 2 || len(p2.Markers) != 4 || len(boss.Markers) != 1 || len(tl.Unknown.Markers) != 0 {
 		t.Fatalf("markers: p1 %d, p2 %d, boss %d, unknown %d", len(p1.Markers), len(p2.Markers), len(boss.Markers), len(tl.Unknown.Markers))

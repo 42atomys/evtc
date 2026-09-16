@@ -44,7 +44,7 @@ func Example() {
 	if err != nil {
 		panic(err)
 	}
-	player, boss := tl.Players[0], tl.Targets[0]
+	player, boss := tl.Players().First(), tl.Targets[0]
 
 	cast := player.Casts().First()
 	fmt.Println("cast:", cast.Skill.Name, cast.Interval, "completed:", cast.Completed())
@@ -126,7 +126,7 @@ func ExampleHits_Reverse() {
 	if err != nil {
 		panic(err)
 	}
-	hits := tl.Players[0].Hits()
+	hits := tl.Players().First().Hits()
 	last := hits.Reverse().First()
 	fmt.Println(last.Time, last.Damage)
 	fmt.Println(hits.Reverse().Limit(1).Damage(), hits.Skip(1).Count())
@@ -154,7 +154,7 @@ func ExamplePlayer_Spec() {
 	if err != nil {
 		panic(err)
 	}
-	p := tl.Players[0]
+	p := tl.Players().First()
 	fmt.Println(p.Profession, p.EliteSpec, p.Spec())
 	// Output:
 	// Guardian None Guardian

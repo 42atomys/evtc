@@ -35,7 +35,7 @@ func TestHealsFilters(t *testing.T) {
 	}{
 		{"all", q, []int32{100, 50, 300, 70, 20}},
 		{"By node", q.By(alpha), []int32{100, 50}},
-		{"By player", q.By(tl.Players[0]), []int32{100, 50}},
+		{"By player", q.By(tl.Players().First()), []int32{100, 50}},
 		{"By agent", q.By(alpha.Agent), []int32{100, 50}},
 		{"By nil", q.By(nil), nil},
 		{"By typed nil", q.By((*timeline.Player)(nil)), nil},

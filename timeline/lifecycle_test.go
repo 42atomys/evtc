@@ -24,7 +24,7 @@ func TestStatesDownsDeaths(t *testing.T) {
 	b.state(7000, addrP2, evtc.StateChangeDead)
 	tl := mustBuild(t, b.build(10000))
 
-	p1, p2, boss := tl.Players[0], tl.Players[1], tl.Targets[0]
+	p1, p2, boss := tl.players[0], tl.players[1], tl.Targets[0]
 	for _, tt := range []struct {
 		at   time.Duration
 		want LifeState
@@ -111,8 +111,8 @@ func TestBreakbar(t *testing.T) {
 	if bb.Interval != NewInterval(time.Second, 3*time.Second) || !bb.Broken() || bb.Agent != add || len(bb.hits) != 3 {
 		t.Errorf("breakbar = %+v", bb)
 	}
-	if bb.TotalCC() != 150 || bb.CC(tl.Players[0]) != 100 || bb.CC(tl.Players[1]) != 50 || bb.CC(tl.Unknown) != 0 {
-		t.Errorf("CC = %d, p1 %d", bb.TotalCC(), bb.CC(tl.Players[0]))
+	if bb.TotalCC() != 150 || bb.CC(tl.players[0]) != 100 || bb.CC(tl.players[1]) != 50 || bb.CC(tl.Unknown) != 0 {
+		t.Errorf("CC = %d, p1 %d", bb.TotalCC(), bb.CC(tl.players[0]))
 	}
 	if bb.Percent.Len() != 3 {
 		t.Errorf("percent samples = %d", bb.Percent.Len())

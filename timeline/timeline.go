@@ -52,8 +52,6 @@ type Timeline struct {
 	// followed by the agents synthesized for addresses that events
 	// reference without a table entry.
 	Agents []*Agent
-	// Players holds the player agents, in table order.
-	Players []*Player
 	// Targets holds the boss of the log first, then every NPC or gadget
 	// that exchanged hits with the players, in order of first exchange.
 	Targets []*Target
@@ -102,6 +100,7 @@ type Timeline struct {
 	// registration order.
 	Extensions []*Extension
 
+	players  []*Player
 	npcs     []*Agent
 	gadgets  []*Agent
 	byAddr   map[uint64]*Agent
@@ -241,6 +240,9 @@ func (tl *Timeline) WallClock(t time.Duration) time.Time { return tl.Start.Add(t
 // It is only meaningful for events whose Time field is a timestamp.
 func (tl *Timeline) TimeOf(e *evtc.Event) time.Duration { return tl.rel(e.Time) }
 
+// Players returns every player of the log, in table order.
+func (tl *Timeline) Players() Players { return Players{From(tl.players)} }
+
 // Hits returns every hit of the log, in time order.
 func (tl *Timeline) Hits() Hits { return Hits{From(tl.hits)} }
 
@@ -303,7 +305,7 @@ func (tl *Timeline) TargetBySpeciesIDAt(id uint16, t time.Duration) *Target {
 // without its leading colon, or nil.
 func (tl *Timeline) PlayerByAccount(account string) *Player {
 	account = strings.TrimPrefix(account, ":")
-	for _, p := range tl.Players {
+	for _, p := range tl.players {
 		if p.Account == account {
 			return p
 		}
@@ -313,7 +315,7 @@ func (tl *Timeline) PlayerByAccount(account string) *Player {
 
 // PlayerByName returns the player with the given character name, or nil.
 func (tl *Timeline) PlayerByName(name string) *Player {
-	for _, p := range tl.Players {
+	for _, p := range tl.players {
 		if p.Name == name {
 			return p
 		}
@@ -325,7 +327,7 @@ func (tl *Timeline) PlayerByName(name string) *Player {
 // when it is empty.
 func (tl *Timeline) Subgroup(n int) []*Player {
 	var out []*Player
-	for _, p := range tl.Players {
+	for _, p := range tl.players {
 		if p.Subgroup == n {
 			out = append(out, p)
 		}

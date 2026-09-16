@@ -585,7 +585,7 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 			fail("boss %v listed after a non-boss target", tg)
 		}
 	}
-	for _, p := range tl.Players {
+	for _, p := range tl.players {
 		if p.Agent.Player != p || p.Kind != KindPlayer {
 			fail("player %v is inconsistent", p)
 		}
@@ -686,7 +686,7 @@ func TestQueriesAgainstBruteForce(t *testing.T) {
 	casts := tl.Casts().All()
 	stacks := tl.Stacks().All()
 	boss := tl.Targets[0]
-	p := tl.Players[0]
+	p := tl.players[0]
 
 	for range 200 {
 		iv := randomInterval()

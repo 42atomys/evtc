@@ -296,7 +296,7 @@ func TestWithoutStats(t *testing.T) {
 		t.Errorf("stats of a log without registration = %v", Of(tl))
 	}
 	var s *Stats
-	if s.Heals().Count() != 0 || s.Heals().Healed() != 0 || s.Agent(tl.Players[0]) != nil || s.Heals().PerAgent() != nil {
+	if s.Heals().Count() != 0 || s.Heals().Healed() != 0 || s.Agent(tl.Players().First()) != nil || s.Heals().PerAgent() != nil {
 		t.Error("a nil Stats does not answer as an empty one")
 	}
 	var a *Agent

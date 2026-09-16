@@ -49,11 +49,11 @@ func TestPlayerSpec(t *testing.T) {
 	tl := mustBuild(t, b.build(1000))
 
 	for i, want := range []string{"Guardian", "Willbender", "Engineer", "Profession(42)"} {
-		if got := tl.Players[i].Spec(); got != want {
+		if got := tl.players[i].Spec(); got != want {
 			t.Errorf("player %d Spec = %q, want %q", i, got, want)
 		}
 	}
-	p2 := tl.Players[1]
+	p2 := tl.players[1]
 	if p2.Profession != ProfessionWarrior || p2.EliteSpec != EliteWillbender || p2.EliteSpec.Profession() != ProfessionGuardian {
 		t.Errorf("player 2 = %v %v", p2.Profession, p2.EliteSpec)
 	}

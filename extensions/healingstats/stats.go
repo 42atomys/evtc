@@ -41,7 +41,7 @@ type Stats struct {
 	// Agents holds one node per agent of the timeline, in the order of
 	// Timeline.Agents.
 	Agents []*Agent
-	// Players holds the players, in the order of Timeline.Players.
+	// Players holds the players, in the order of Timeline.Players().
 	Players []*Agent
 	// Unknown is the node of the Unknown sentinel of the timeline: the
 	// source of the heals whose source the log does not know.

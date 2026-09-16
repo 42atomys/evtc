@@ -52,7 +52,7 @@ func session(tl *timeline.Timeline) {
 		hi, _ := tl.Ping.MaxBetween(tl.Interval())
 		fmt.Printf("ping between %d and %d ms\n", lo, hi)
 	}
-	for _, p := range tl.Players {
+	for p := range tl.Players().Seq() {
 		if len(p.Markers) > 0 {
 			fmt.Printf("  %s wore %d markers, team %d\n", p.Name, len(p.Markers), p.TeamAt(tl.Duration))
 		}
@@ -64,7 +64,7 @@ func agentStates(tl *timeline.Timeline) {
 	w := table()
 	fmt.Fprintln(w, "player\tswaps\tsets used\tstealth state\tgliding\ttransformations\tstun breaks")
 	span := tl.Interval()
-	for _, p := range tl.Players {
+	for p := range tl.Players().Seq() {
 		swaps := max(p.WeaponSet.Len()-1, 0)
 		sets := map[uint32]bool{}
 		for sp := range p.WeaponSet.Seq() {
@@ -110,7 +110,7 @@ func activity(tl *timeline.Timeline) {
 	w := table()
 	fmt.Fprintln(w, "player\tquickness present\tactive\teffective\tmight present\tactive\teffective")
 	at := tl.Duration / 2
-	for _, p := range tl.Players {
+	for p := range tl.Players().Seq() {
 		q := p.Stacks().OfBuff(timeline.BuffQuickness)
 		m := p.Stacks().OfBuff(timeline.BuffMight)
 		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%d\n", p.Name, q.CountAt(at), q.ActiveAt(at).Count(), q.EffectiveAt(at), m.CountAt(at), m.ActiveAt(at).Count(), m.EffectiveAt(at))
@@ -209,7 +209,7 @@ func gadgets(tl *timeline.Timeline) {
 	}
 	w.Flush()
 	jumps := 0
-	for _, p := range tl.Players {
+	for p := range tl.Players().Seq() {
 		jumps += p.Airborne.Len()
 	}
 	fmt.Printf("%d agents with animations or a name state, %d jump events\n", len(agents), jumps)

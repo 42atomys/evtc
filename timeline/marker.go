@@ -228,7 +228,7 @@ func (gm *GroundMarker) Removed() bool { return gm.Remove != nil }
 func (tl *Timeline) Commander() *Player {
 	var best *Player
 	var at time.Duration
-	for _, p := range tl.Players {
+	for _, p := range tl.players {
 		for _, m := range p.Markers {
 			if m.Commander && (best == nil || m.Interval.Start >= at) {
 				best, at = p, m.Interval.Start
@@ -241,7 +241,7 @@ func (tl *Timeline) Commander() *Player {
 // CommanderAt returns the player wearing a commander tag at t, the first
 // in table order when several do, nil when none does.
 func (tl *Timeline) CommanderAt(t time.Duration) *Player {
-	for _, p := range tl.Players {
+	for _, p := range tl.players {
 		if p.IsCommanderAt(t) {
 			return p
 		}

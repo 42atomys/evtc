@@ -40,7 +40,7 @@ func TestSessionAndSquad(t *testing.T) {
 	l := b.build(10000)
 	l.Events[len(l.Events)-1].DstAgent = 1 // the log ended by a map exit
 	tl := mustBuild(t, l)
-	p1, p2 := tl.Players[0], tl.Players[1]
+	p1, p2 := tl.players[0], tl.players[1]
 
 	if tl.Language != LanguageFrench || tl.Language.String() != "French" || Language(1).String() != "Language(1)" || tl.GameBuild != 170000 || tl.ShardID != 1234 || tl.FractalScale != 100 {
 		t.Errorf("session = %v %d %d %d", tl.Language, tl.GameBuild, tl.ShardID, tl.FractalScale)

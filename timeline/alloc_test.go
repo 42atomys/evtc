@@ -11,7 +11,7 @@ import (
 // allocate it.
 func TestQueryAllocations(t *testing.T) {
 	tl := mustBuild(t, genLog(genOptions{players: 8, adds: 6, duration: 60 * time.Second, seed: 5}))
-	boss, p := tl.Targets[0], tl.Players[0]
+	boss, p := tl.Targets[0], tl.players[0]
 	iv := NewInterval(10*time.Second, 20*time.Second)
 	at := 15 * time.Second
 	var sink int

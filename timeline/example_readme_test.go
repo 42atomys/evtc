@@ -185,7 +185,7 @@ func ExampleBuild() {
 	if err != nil {
 		panic(err) // timeline.ErrLegacyLog for logs older than arcdps 20260501
 	}
-	fmt.Println(tl.Boss().Name, "fought by", len(tl.Players), "players for", tl.Duration)
+	fmt.Println(tl.Boss().Name, "fought by", tl.Players().Count(), "players for", tl.Duration)
 	fmt.Println("arcdps build", tl.Build, "events", tl.Events().Count(), "hits", tl.Hits().Count())
 	// Output:
 	// Sabetha fought by 2 players for 5s
@@ -194,14 +194,16 @@ func ExampleBuild() {
 
 func ExampleTimeline_Players() {
 	tl := mustBuild()
-	for _, p := range tl.Players {
+	for p := range tl.Players().Seq() {
 		fmt.Println(p.Name, p.Account, "group", p.Subgroup, p.Spec())
 	}
 	fmt.Println(tl.PlayerByAccount("Bravo.5678").Toughness, tl.PlayerByName("Nobody") == nil)
+	fmt.Println(tl.Players().InSubgroup(2).First().Name, tl.Players().OfProfession(timeline.ProfessionGuardian).Count())
 	// Output:
 	// Alpha Alpha.1234 group 1 Firebrand
 	// Bravo Bravo.5678 group 2 Warrior
 	// 1500 true
+	// Bravo 1
 }
 
 func ExampleHits_PerAgent_damage() {
@@ -234,7 +236,7 @@ func ExampleAgent_PhasesByHealth_dps() {
 
 func ExampleCasts_Hits() {
 	tl := mustBuild()
-	alpha, boss := tl.Players[0], tl.Boss()
+	alpha, boss := tl.Players().First(), tl.Boss()
 	cast := alpha.Casts().OfSkill(slam).First()
 	fmt.Println(cast.Skill, cast.Interval, "completed:", cast.Completed())
 	fmt.Println("hits:", cast.Hits().Count(), "crit:", cast.Hits().Crits().Count(), "damage:", cast.Hits().Damage())
@@ -247,7 +249,7 @@ func ExampleCasts_Hits() {
 
 func ExampleAgent_PositionAt() {
 	tl := mustBuild()
-	alpha, boss := tl.Players[0], tl.Boss()
+	alpha, boss := tl.Players().First(), tl.Boss()
 	at := time.Second
 	fmt.Println(alpha.PositionAt(at), boss.PositionAt(at))
 	fmt.Printf("%.0f units apart\n", alpha.DistanceTo(boss, at))
@@ -260,7 +262,7 @@ func ExampleAgent_PositionAt() {
 
 func ExampleStacks_Uptime() {
 	tl := mustBuild()
-	alpha := tl.Players[0]
+	alpha := tl.Players().First()
 	stacks := alpha.Stacks().OfBuff(timeline.BuffMight)
 	fmt.Println("might stacks:", stacks.Count(), "at 2s:", stacks.CountAt(2*time.Second), "at 3s:", stacks.CountAt(3*time.Second))
 	fmt.Println("uptime:", stacks.Uptime(tl.Interval()), "average:", stacks.Average(tl.Interval()), "applied by", stacks.First().Applier.Name)
@@ -271,7 +273,7 @@ func ExampleStacks_Uptime() {
 
 func ExampleAgent_DownsOf() {
 	tl := mustBuild()
-	bravo := tl.Players[1]
+	bravo := tl.Players().Skip(1).First()
 	down := bravo.Downs[0]
 	fmt.Println(bravo.Name, "down", down.Interval, "by", down.Cause.Skill.Name, "from", down.Cause.Src.Name, "recovered:", down.Recovered)
 	fmt.Println(bravo.IsDownAt(2500*time.Millisecond), bravo.DownedBetween(tl.Since(4*time.Second)), len(bravo.DownsOf(tl.Skill(flak))), len(bravo.DownsBy(tl.Boss())))
@@ -309,7 +311,7 @@ func ExampleHits_Limit() {
 
 func ExampleEvents_Involving() {
 	tl := mustBuild()
-	bravo := tl.Players[1]
+	bravo := tl.Players().Skip(1).First()
 	e := tl.Events().Involving(bravo).Of(evtc.StateChangeDown).First()
 	fmt.Println(tl.TimeOf(e), e.IsStateChange, "src", e.SrcAgent == bravo.Addr)
 	fmt.Println(bravo.Events().Count(), "events involve", bravo.Name)
@@ -362,10 +364,10 @@ func ExampleHits_PerSkill() {
 
 func ExampleAgent_AliveTime() {
 	tl := mustBuild()
-	bravo := tl.Players[1]
+	bravo := tl.Players().Skip(1).First()
 	died, _ := bravo.DiedAt()
 	fmt.Println("alive", bravo.AliveTime(tl.Interval()), "down", bravo.DownTime(tl.Interval()), "died:", died)
-	fmt.Println("in combat", tl.Players[0].CombatTime(tl.Interval()))
+	fmt.Println("in combat", tl.Players().First().CombatTime(tl.Interval()))
 	// Output:
 	// alive 3.2s down 800ms died: 0s
 	// in combat 0s
@@ -385,7 +387,7 @@ func ExampleNumbers_TimeBelow() {
 func ExampleTimeline_Commander() {
 	tl := mustBuild()
 	fmt.Println("commander:", tl.Commander().Name, "| language:", tl.Language, "| game build:", tl.GameBuild)
-	alpha := tl.Players[0]
+	alpha := tl.Players().First()
 	fmt.Println("weapon swaps:", alpha.WeaponSet.Len()-1, "| set at 3s:", alpha.WeaponSetAt(3*time.Second))
 	// Output:
 	// commander: Alpha | language: French | game build: 205780
@@ -394,7 +396,7 @@ func ExampleTimeline_Commander() {
 
 func ExampleAgent_SquadMarkerAt() {
 	tl := mustBuild()
-	bravo := tl.Players[1]
+	bravo := tl.Players().Skip(1).First()
 	m := bravo.Markers[0]
 	fmt.Println(m.Squad, "on", bravo.Name, m.Interval, "removed:", m.Removed(), "| at 2s:", bravo.SquadMarkerAt(2*time.Second), "| at 4s:", bravo.SquadMarkerAt(4*time.Second))
 	heart := tl.GroundMarkerAt(timeline.SquadHeart, 2500*time.Millisecond)
@@ -418,7 +420,7 @@ func ExampleEffects() {
 
 func ExampleMissiles() {
 	tl := mustBuild()
-	m := tl.Players[0].Missiles().First()
+	m := tl.Players().First().Missiles().First()
 	fmt.Println(m.Skill.Name, "from", m.Origin, m.Interval, "aimed at", m.Target().Name, "| hit:", m.HitEnemy)
 	fmt.Println(len(m.Launches), "launch at", m.Launches[0].Time, "towards", m.Launches[0].TargetPos)
 	// Output:
@@ -430,7 +432,7 @@ func ExampleAgent_IsNameVisibleAt() {
 	tl := mustBuild()
 	boss := tl.Boss()
 	fmt.Println("animations:", len(boss.GadgetAnimations), "| name shown at 1s:", boss.IsNameVisibleAt(time.Second), "| at 4s:", boss.IsNameVisibleAt(4*time.Second))
-	fmt.Println("alpha airborne at 1.2s:", tl.Players[0].IsAirborneAt(1200*time.Millisecond), "| rewards:", len(tl.Rewards))
+	fmt.Println("alpha airborne at 1.2s:", tl.Players().First().IsAirborneAt(1200*time.Millisecond), "| rewards:", len(tl.Rewards))
 	// Output:
 	// animations: 1 | name shown at 1s: true | at 4s: false
 	// alpha airborne at 1.2s: true | rewards: 1
@@ -440,7 +442,7 @@ func ExampleExtension() {
 	tl := mustBuild()
 	x := tl.Extension(timeline.ExtensionHealingStats)
 	fmt.Printf("extension %#x version %s wrote %d of the %d extension events\n", x.Signature, x.Version, x.Events().Count(), tl.ExtensionEvents().Count())
-	e := x.Events().On(tl.Players[0]).First()
+	e := x.Events().On(tl.Players().First()).First()
 	fmt.Println("first on Alpha:", tl.Agent(e.SrcAgent).Name, "buff_dmg", e.BuffDamage, "at", tl.TimeOf(e), "| written by", tl.ExtensionOf(e).Version)
 	// Output:
 	// extension 0x9c9b3c99 version 2.18rc1 wrote 1 of the 1 extension events

@@ -20,7 +20,7 @@ func TestEffects(t *testing.T) {
 	b.agentEffect(5000, 0, 5003, 103, 500)
 	b.effectRemove(9000, 0, evtc.StateEffectGroundRemove, 999)
 	tl := mustBuild(t, b.build(10000))
-	p1, p2, boss := tl.Players[0], tl.Players[1], tl.Targets[0]
+	p1, p2, boss := tl.players[0], tl.players[1], tl.Targets[0]
 	all := tl.Effects().All()
 	if len(all) != 5 {
 		t.Fatalf("effects = %d", len(all))
@@ -52,7 +52,7 @@ func TestEffects(t *testing.T) {
 	if len(shares) != 4 || shares[0].EffectID != 5002 || shares[0].Effects.Count() != 2 || shares[1].EffectID != 5000 || shares[1].GUID != g || shares[3].EffectID != 5003 {
 		t.Errorf("PerID = %v", shares)
 	}
-	if groups := q.GroupBy(func(f *Effect) bool { return f.Ground }); groups[true].Count() != 2 || groups[false].First() != f2 || p2.Effects().PerID() == nil || tl.Players[1].Effects().Reverse().PerID()[0].Effects.First() != f2 {
+	if groups := q.GroupBy(func(f *Effect) bool { return f.Ground }); groups[true].Count() != 2 || groups[false].First() != f2 || p2.Effects().PerID() == nil || tl.players[1].Effects().Reverse().PerID()[0].Effects.First() != f2 {
 		t.Error("effect grouping is wrong")
 	}
 	checkInvariants(t, tl)
@@ -63,7 +63,7 @@ func TestEffectWindows(t *testing.T) {
 	b.agentEffect(1000, addrP1, 5000, 1, 0)
 	b.agentEffect(2000, addrP1, 5001, 2, 0)
 	tl := mustBuild(t, b.build(5000))
-	if tl.Effects().Skip(1).First().EffectID != 5001 || tl.Effects().Skip(2).PerID() != nil || tl.Players[1].Effects().PerID() != nil {
+	if tl.Effects().Skip(1).First().EffectID != 5001 || tl.Effects().Skip(2).PerID() != nil || tl.players[1].Effects().PerID() != nil {
 		t.Error("effect windows and empty rankings are wrong")
 	}
 }
@@ -78,7 +78,7 @@ func TestUntrackedEffects(t *testing.T) {
 	b.effectRemove(4500, addrP1, evtc.StateEffectAgentRemove, 0)
 	b.agentEffect(9900, addrP1, 5009, 0, 5000)
 	tl := mustBuild(t, b.build(10000))
-	all := tl.Players[0].Effects().All()
+	all := tl.players[0].Effects().All()
 	if len(all) != 5 {
 		t.Fatalf("effects = %d", len(all))
 	}

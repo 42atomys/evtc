@@ -14,7 +14,7 @@ import (
 func TestQueryAllocations(t *testing.T) {
 	s := mustBuild(t, genLog(5, 120))
 	tl := s.Timeline
-	p := tl.Players[0]
+	p := tl.Players().First()
 	a := s.Agent(p)
 	iv := timeline.NewInterval(10*time.Second, 20*time.Second)
 	var sink int

@@ -44,9 +44,10 @@ func checkInvariants(tb testing.TB, s *Stats) {
 	if s.Unknown == nil || s.Unknown.Agent != tl.Unknown || s.byAgent[tl.Unknown] != s.Unknown || s.Unknown.Stats != s || s.Unknown.Recorded {
 		fail("unknown node is inconsistent: %+v", s.Unknown)
 	}
+	players := tl.Players().All()
 	for i, p := range s.Players {
-		if p.Agent != tl.Players[i].Agent || s.Agent(tl.Players[i]) != p {
-			fail("player %d is %v, want %v", i, p, tl.Players[i])
+		if p.Agent != players[i].Agent || s.Agent(players[i]) != p {
+			fail("player %d is %v, want %v", i, p, players[i])
 		}
 	}
 

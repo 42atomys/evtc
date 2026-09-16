@@ -43,7 +43,7 @@ func offense(tl *timeline.Timeline) {
 	section("Offense (credited hits, minions included)")
 	w := table()
 	fmt.Fprintln(w, "player\ttotal\tboss\tcleave\tpower\tcondi\tcrit\tflank\tscholar\tmoving\tdodges\tswaps\tresurrects\tinterrupts")
-	for _, p := range tl.Players {
+	for p := range tl.Players().Seq() {
 		foes := p.HitsCredited().Landed().Foes()
 		strikes := foes.Strikes()
 		swaps := tl.Events().Of(evtc.StateWeaponSwap).Involving(p).Count()
@@ -64,7 +64,7 @@ func defense(tl *timeline.Timeline) {
 	section("Defense")
 	w := table()
 	fmt.Fprintln(w, "player\thits taken\thealth dmg\tbarrier\tblocked\tevaded\tabsorbed\tmissed\tdown time\tworst skill")
-	for _, p := range tl.Players {
+	for p := range tl.Players().Seq() {
 		taken := p.HitsTaken()
 		worst := "-"
 		if shares := taken.Landed().PerSkill(); len(shares) > 0 {
@@ -96,10 +96,10 @@ func boonGeneration(tl *timeline.Timeline) {
 			given float64
 		}
 		var gens []gen
-		for _, p := range tl.Players {
+		for p := range tl.Players().Seq() {
 			applied := p.StacksApplied().OfBuff(id)
 			var sum float64
-			for _, r := range tl.Players {
+			for r := range tl.Players().Seq() {
 				if r == p {
 					continue
 				}
@@ -110,7 +110,7 @@ func boonGeneration(tl *timeline.Timeline) {
 				}
 			}
 			if sum > 0 {
-				gens = append(gens, gen{p.Name, sum / float64(len(tl.Players)-1)})
+				gens = append(gens, gen{p.Name, sum / float64(tl.Players().Count()-1)})
 			}
 		}
 		slices.SortFunc(gens, func(a, b gen) int { return cmp.Compare(b.given, a.given) })
@@ -131,7 +131,7 @@ func cleanses(tl *timeline.Timeline) {
 	section("Cleanses and strips")
 	w := table()
 	fmt.Fprintln(w, "player\tconditions cleansed\tboons stripped\tmost cleansed")
-	for _, p := range tl.Players {
+	for p := range tl.Players().Seq() {
 		// When a skill cleanses or strips, arcdps writes one manual removal
 		// per stack naming the agent that did it. Natural expiries are
 		// single removals.
@@ -151,7 +151,7 @@ func cleanses(tl *timeline.Timeline) {
 
 func deathAnalysis(tl *timeline.Timeline) {
 	section("What downed them (damage taken in the five seconds before)")
-	for _, p := range tl.Players {
+	for p := range tl.Players().Seq() {
 		for _, d := range p.Downs {
 			before := timeline.NewInterval(d.Start-5*time.Second, d.Start)
 			taken := p.HitsTaken().Landed().Between(before)
@@ -236,7 +236,7 @@ func cannons(tl *timeline.Timeline) {
 		}
 		pos, _ := g.Position.First()
 		var nearby []string
-		for _, p := range tl.Players {
+		for p := range tl.Players().Seq() {
 			if d := p.DistanceTo(g, taken.Last().Time); !math.IsNaN(d) && d < 400 {
 				nearby = append(nearby, p.Name)
 			}
@@ -313,9 +313,10 @@ func spread(tl *timeline.Timeline) {
 	for i, phase := range boss.PhasesByHealth(75, 50, 25) {
 		var sum, n float64
 		for t := phase.Start; t <= phase.End; t += 2 * time.Second {
-			for a := 0; a < len(tl.Players); a++ {
-				for b := a + 1; b < len(tl.Players); b++ {
-					if d := tl.Players[a].DistanceTo(tl.Players[b], t); !math.IsNaN(d) && tl.Players[a].IsAliveAt(t) && tl.Players[b].IsAliveAt(t) {
+			alive := tl.Players().AliveAt(t).All()
+			for a := range alive {
+				for b := a + 1; b < len(alive); b++ {
+					if d := alive[a].DistanceTo(alive[b], t); !math.IsNaN(d) {
 						sum, n = sum+d, n+1
 					}
 				}
@@ -329,7 +330,7 @@ func closeCalls(tl *timeline.Timeline) {
 	section("Close calls")
 	w := table()
 	fmt.Fprintln(w, "player\tlowest health\tat\ttime under 50%\tbarrier peak")
-	for _, p := range tl.Players {
+	for p := range tl.Players().Seq() {
 		lowest, at := 100.0, time.Duration(0)
 		for s := range p.Health.Seq() {
 			if s.Value < lowest {

@@ -56,7 +56,7 @@ func TestAddressChangeEdgeCases(t *testing.T) {
 	if ghost.Hits().Count() != 2 || tl.Agent(0x9001) != ghost || tl.Agent(0x9002) != ghost || ghost.Addr != 0x9002 {
 		t.Errorf("ghost = %+v hits %d", ghost, ghost.Hits().Count())
 	}
-	if tl.Agent(addrP1) != tl.Players[0].Agent {
+	if tl.Agent(addrP1) != tl.players[0].Agent {
 		t.Error("a self alias broke the lookup")
 	}
 	checkInvariants(t, tl)
@@ -70,7 +70,7 @@ func TestCorruptTimes(t *testing.T) {
 	b.add(evtc.Event{Time: rawEpoch + uint64(maxSpan/time.Millisecond), SrcAgent: addrP1, IsStateChange: evtc.StateChangeDown})
 	tl := mustBuild(t, b.build(5000))
 
-	p1 := tl.Players[0]
+	p1 := tl.players[0]
 	if tl.Duration != maxSpan || len(p1.Deaths) != 0 || len(p1.Downs) != 2 || tl.Events().Count() != len(tl.Log.Events)-1 {
 		t.Errorf("duration %v deaths %d downs %d events %d of %d", tl.Duration, len(p1.Deaths), len(p1.Downs), tl.Events().Count(), len(tl.Log.Events))
 	}
@@ -114,8 +114,8 @@ func TestBuffArenaOverflow(t *testing.T) {
 		b.buffApply(uint64(1000+i), addrP2, addrP1, id, 1000, uint32(1+i))
 	}
 	tl := mustBuild(t, b.build(10000))
-	if len(tl.Buffs) != n || tl.Players[0].Stacks().Count() != n || tl.Buff(5000+n-1) == nil || tl.Buff(5000+n-1).Skill.Buff != tl.Buff(5000+n-1) {
-		t.Errorf("buffs = %d stacks = %d", len(tl.Buffs), tl.Players[0].Stacks().Count())
+	if len(tl.Buffs) != n || tl.players[0].Stacks().Count() != n || tl.Buff(5000+n-1) == nil || tl.Buff(5000+n-1).Skill.Buff != tl.Buff(5000+n-1) {
+		t.Errorf("buffs = %d stacks = %d", len(tl.Buffs), tl.players[0].Stacks().Count())
 	}
 	checkInvariants(t, tl)
 }
@@ -129,7 +129,7 @@ func TestSentinelHasNoMaster(t *testing.T) {
 	b.hit(1000, 0, addrBoss, skillSlam, 7, evtc.ResultStrikeDamageNormal)
 	tl := mustBuild(t, b.build(10000))
 
-	p1, p2 := tl.Players[0], tl.Players[1]
+	p1, p2 := tl.players[0], tl.players[1]
 	if tl.Unknown.Master != nil || len(p1.Minions) != 0 || len(p2.Minions) != 0 || p1.Master != nil {
 		t.Errorf("sentinel master = %v, minions of p1 %d, of p2 %d", tl.Unknown.Master, len(p1.Minions), len(p2.Minions))
 	}
@@ -147,7 +147,7 @@ func TestAddressChange(t *testing.T) {
 	b.hit(2000, addrP1, addrBoss, skillSlam, 100, evtc.ResultStrikeDamageNormal)
 	tl := mustBuild(t, b.build(10000))
 
-	p1 := tl.Players[0]
+	p1 := tl.players[0]
 	if p1.Hits().Count() != 2 || tl.Agent(old) != p1.Agent || len(tl.Agents) != 7 {
 		t.Errorf("hits %d agent %v agents %d", p1.Hits().Count(), tl.Agent(old), len(tl.Agents))
 	}
@@ -165,7 +165,7 @@ func TestAddressChange(t *testing.T) {
 	b.add(evtc.Event{Time: b.at(500), SrcAgent: addrP1, DstAgent: old, IsStateChange: evtc.StateIIDChange})
 	b.hit(1000, old, addrBoss, skillSlam, 100, evtc.ResultStrikeDamageNormal)
 	tl = mustBuild(t, b.build(10000))
-	if tl.Players[0].Hits().Count() != 1 || tl.Agent(old) != tl.Players[0].Agent {
+	if tl.players[0].Hits().Count() != 1 || tl.Agent(old) != tl.players[0].Agent {
 		t.Error("an address change towards an unknown address was not aliased")
 	}
 }
