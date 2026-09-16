@@ -256,8 +256,8 @@ func TestTimelineLookups(t *testing.T) {
 	if tl.PlayerByName("Bravo") != p2 || tl.PlayerByName("Alpha") != p1 || tl.PlayerByName("Charlie") != nil {
 		t.Error("PlayerByName is wrong")
 	}
-	if g := tl.Subgroup(1); len(g) != 1 || g[0] != p1 || len(tl.Subgroup(2)) != 1 || tl.Subgroup(3) != nil {
-		t.Errorf("Subgroup(1) = %v", g)
+	if g := tl.Players().InSubgroup(1); g.Count() != 1 || g.First() != p1 || tl.Players().InSubgroup(2).Count() != 1 || tl.Players().InSubgroup(3).Any() {
+		t.Errorf("InSubgroup(1) = %v", g.All())
 	}
 	if named := tl.AgentsNamed("Crow"); len(named) != 2 || named[0] != add1.Agent || named[1] != add2.Agent || tl.AgentsNamed("Nobody") != nil {
 		t.Errorf("AgentsNamed = %v", named)

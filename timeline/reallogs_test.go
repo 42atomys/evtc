@@ -368,7 +368,7 @@ func smoke(t *testing.T, name string, tl *Timeline) {
 	tl.CommanderAt(tl.Duration / 2)
 	tl.GroundMarkerAt(SquadArrow, tl.Duration/2)
 	tl.PingAt(tl.Duration / 2)
-	tl.Subgroup(1)
+	tl.Players().InSubgroup(1).Count()
 	tl.AgentsNamed("")
 	tl.Since(tl.Duration / 2)
 	tl.ExtensionEvents().Count()

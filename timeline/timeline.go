@@ -323,18 +323,6 @@ func (tl *Timeline) PlayerByName(name string) *Player {
 	return nil
 }
 
-// Subgroup returns the players of squad subgroup n in table order, nil
-// when it is empty.
-func (tl *Timeline) Subgroup(n int) []*Player {
-	var out []*Player
-	for _, p := range tl.players {
-		if p.Subgroup == n {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
 // AgentsNamed returns every agent with the given name in table order, nil
 // when there is none.
 func (tl *Timeline) AgentsNamed(name string) []*Agent {

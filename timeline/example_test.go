@@ -70,7 +70,7 @@ func ExampleTimeline_lookups() {
 	p := tl.PlayerByAccount(":Alpha.1234")
 	fmt.Println(p.Name, "subgroup", p.Subgroup, "hits:", p.Hits().Count())
 	fmt.Println(tl.Boss().Name, tl.TargetBySpeciesID(15375) == tl.Boss())
-	fmt.Println(tl.PlayerByName("Nobody") == nil, len(tl.Subgroup(2)))
+	fmt.Println(tl.PlayerByName("Nobody") == nil, tl.Players().InSubgroup(2).Count())
 	// Output:
 	// Alpha subgroup 1 hits: 2
 	// Sabetha true
