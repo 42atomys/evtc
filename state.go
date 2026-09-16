@@ -322,6 +322,13 @@ const (
 	// src_agent: agent, dst_agent: 1 if leaving platform, 0 on landing,
 	// is_offcycle: undocumented server data.
 	StateJump
+	// StateGadgetModelInfo is the model information of a gadget. It is
+	// also emitted when is_flanking changes.
+	// src_agent: agent, dst_agent: the null-terminated wchar_t model file
+	// (the arcdps README writes the pointer to it), value: uint64 prop id,
+	// is_flanking: hide bit (set by gadgets such as the Cardinal Adina
+	// pillars).
+	StateGadgetModelInfo
 	// StateUnknown is any type newer than this list.
 	StateUnknown
 )
@@ -414,6 +421,7 @@ var stateChangeNames = []string{
 	StateTick:                      "Tick",
 	StateTeleport:                  "Teleport",
 	StateJump:                      "Jump",
+	StateGadgetModelInfo:           "GadgetModelInfo",
 	StateUnknown:                   "Unknown",
 }
 

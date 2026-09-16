@@ -20,7 +20,8 @@ func TestStateChangeValues(t *testing.T) {
 		{StateBuffRemoveAll, 72},
 		{StateTick, 84},
 		{StateJump, 86},
-		{StateUnknown, 87},
+		{StateGadgetModelInfo, 87},
+		{StateUnknown, 88},
 	}
 	for _, tt := range tests {
 		if uint8(tt.s) != tt.want {
@@ -39,6 +40,7 @@ func TestStateChangeString(t *testing.T) {
 	}{
 		{StateCombat, "Combat"},
 		{StateBuffApply, "BuffApply"},
+		{StateGadgetModelInfo, "GadgetModelInfo"},
 		{StateUnknown, "Unknown"},
 		{StateChange(200), "StateChange(200)"},
 	}
