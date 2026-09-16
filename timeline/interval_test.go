@@ -28,6 +28,31 @@ func TestIntervalConstructors(t *testing.T) {
 	}
 }
 
+func TestIntervalEvery(t *testing.T) {
+	iv := NewInterval(time.Second, 8*time.Second)
+	got := iv.Every(3 * time.Second)
+	want := []Interval{NewInterval(time.Second, 4*time.Second), NewInterval(4*time.Second, 7*time.Second), NewInterval(7*time.Second, 8*time.Second)}
+	if len(got) != len(want) {
+		t.Fatalf("Every = %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("piece %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+	if got := NewInterval(0, 6*time.Second).Every(2 * time.Second); len(got) != 3 || got[2] != NewInterval(4*time.Second, 6*time.Second) {
+		t.Errorf("Every with an exact fit = %v", got)
+	}
+	for _, d := range []time.Duration{0, -time.Second, 7 * time.Second, time.Minute} {
+		if got := iv.Every(d); len(got) != 1 || got[0] != iv {
+			t.Errorf("Every(%v) = %v", d, got)
+		}
+	}
+	if got := At(3 * time.Second).Every(time.Second); len(got) != 1 || got[0] != At(3*time.Second) {
+		t.Errorf("Every of an instant = %v", got)
+	}
+}
+
 func TestInterval(t *testing.T) {
 	iv := NewInterval(3*time.Second, time.Second)
 	if iv != (Interval{Start: time.Second, End: 3 * time.Second}) {

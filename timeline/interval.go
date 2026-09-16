@@ -83,3 +83,18 @@ func (iv Interval) Split(times ...time.Duration) []Interval {
 	}
 	return append(out, Interval{Start: start, End: iv.End})
 }
+
+// Every cuts the interval into consecutive pieces of length d, starting at
+// Start. Adjacent pieces share their bound, and the last piece stops at End
+// so it can be shorter than d. A d of zero or less returns the interval
+// alone.
+func (iv Interval) Every(d time.Duration) []Interval {
+	if d <= 0 || iv.Duration() <= d {
+		return []Interval{iv}
+	}
+	out := make([]Interval, 0, (iv.Duration()+d-1)/d)
+	for start := iv.Start; start < iv.End; start += d {
+		out = append(out, Interval{Start: start, End: min(start+d, iv.End)})
+	}
+	return out
+}
