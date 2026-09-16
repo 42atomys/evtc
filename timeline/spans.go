@@ -106,6 +106,24 @@ func (s Spans[T]) Map[U any](f func(Span[T]) U) []U {
 	return out
 }
 
+// Intervals returns the intervals covered by the spans accepted by p, in
+// time order. Accepted spans that touch or overlap are merged into one
+// interval. A nil p accepts every span.
+func (s Spans[T]) Intervals(p func(Span[T]) bool) []Interval {
+	var out []Interval
+	for _, sp := range s.spans {
+		if p != nil && !p(sp) {
+			continue
+		}
+		if n := len(out); n > 0 && sp.Start <= out[n-1].End {
+			out[n-1] = out[n-1].Union(sp.Interval)
+			continue
+		}
+		out = append(out, sp.Interval)
+	}
+	return out
+}
+
 // Total returns the summed duration of the spans accepted by p, clipped to
 // iv. A nil p accepts every span.
 func (s Spans[T]) Total(iv Interval, p func(Span[T]) bool) time.Duration {

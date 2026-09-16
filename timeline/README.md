@@ -52,10 +52,13 @@ Time-varying values live on `Agent`:
   step series with threshold crossings (`Crossings`, `FirstBelow`).
 - `Life`, `Defiance`, `InCombat`, `Targetable`, `Team`, `WeaponSet`,
   `Stealth`, `Gliding`, `Transformation`, `Airborne` and `NameVisible` are
-  `Spans`, contiguous states with `At`, `ValueAt`, `Total`, and with
-  `TeamAt`, `WeaponSetAt`, `StealthAt`, `TransformationAt`,
+  `Spans`, contiguous states with `At`, `ValueAt`, `Total`, `Intervals`,
+  and with `TeamAt`, `WeaponSetAt`, `StealthAt`, `TransformationAt`,
   `IsGlidingAt`, `GlidingTime`, `IsAirborneAt`, `AirborneTime`,
-  `IsNameVisibleAt` and `NameVisibleTime` as helpers.
+  `IsNameVisibleAt` and `NameVisibleTime` as helpers. `Intervals` merges
+  the spans that follow each other, so
+  `a.Targetable.Intervals(func(s timeline.Span[bool]) bool { return s.Value })`
+  gives the periods where the agent could be targeted.
 
 Each `BuffStack` carries its own `Active` spans, and `Timeline.Ping`
 samples the latency of the recording client (`PingAt`).

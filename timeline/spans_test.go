@@ -40,6 +40,16 @@ func TestSpans(t *testing.T) {
 	if got := s.Where(down); len(got) != 1 {
 		t.Errorf("Where = %v", got)
 	}
+	alive := func(sp Span[LifeState]) bool { return sp.Value == LifeAlive }
+	if got := s.Intervals(alive); len(got) != 2 || got[0] != NewInterval(0, 2*time.Second) || got[1] != NewInterval(3*time.Second, 5*time.Second) {
+		t.Errorf("Intervals alive = %v", got)
+	}
+	if got := s.Intervals(nil); len(got) != 2 || got[0] != NewInterval(0, 5*time.Second) || got[1] != NewInterval(7*time.Second, 9*time.Second) {
+		t.Errorf("Intervals all = %v", got)
+	}
+	if got := s.Intervals(func(Span[LifeState]) bool { return false }); got != nil {
+		t.Errorf("Intervals none = %v", got)
+	}
 	if got := s.Map(func(sp Span[LifeState]) LifeState { return sp.Value }); len(got) != 4 || got[3] != LifeDead {
 		t.Errorf("Map = %v", got)
 	}
