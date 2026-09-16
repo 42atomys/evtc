@@ -126,8 +126,8 @@ const (
 	StateSkillTiming
 	// StateDefianceBarState when agent defiance bar state changed.
 	// src_agent: agent, dst_agent: new breakbar state (0 active, 1 recover,
-	// 2 immune, 3 none) per the arcdps README. Logs of build 20260816 carry
-	// the state in value while dst_agent stays zero.
+	// 2 immune, 3 none). Logs of build 20260816 carry the state in value
+	// while dst_agent stays zero.
 	StateDefianceBarState
 	// StateDefianceBarPercent when agent defiance bar percentage changed.
 	// src_agent: agent, value: float new percentage.
@@ -261,16 +261,18 @@ const (
 	// StateBuffRemoveSingle when a buff stack is removed.
 	// src_agent: agent with buff removed, dst_agent: agent removing it,
 	// value: ms duration removed, skillid: buff skill id,
-	// is_buffremove: of enum BuffRemove, pad61: uint32 trackable id.
+	// is_buffremove: of enum BuffRemove, iff, is_ninety, is_fifty,
+	// is_moving, is_flanking: as combat, pad61: uint32 trackable id.
 	StateBuffRemoveSingle
 	// StateBuffRemoveAll when all buff stacks of skillid are removed.
 	// src_agent: agent with buffs removed, dst_agent: agent removing them,
 	// value: ms duration removed as duration, buff_dmg: as intensity,
-	// skillid: buff skill id, is_buffremove: of enum BuffRemove.
+	// skillid: buff skill id, is_buffremove: of enum BuffRemove, iff,
+	// is_ninety, is_fifty, is_moving, is_flanking: as combat.
 	StateBuffRemoveAll
 	// StateTransformation when agent transformation changed.
 	// src_agent: agent, skillid: transformation id (0 if untransformed),
-	// value: duration.
+	// value: duration, is_shields, is_offcycle: undocumented server data.
 	StateTransformation
 	// StateWvWTeams is the wvw team association.
 	// src_agent: uint32[6] redshard, blueshard, greenshard, redteam,
@@ -313,10 +315,12 @@ const (
 	// real update, value: ping.
 	StateTick
 	// StateTeleport when agent position changed by teleport.
-	// src_agent: agent, dst_agent: float[3] x/y/z of target.
+	// src_agent: agent, dst_agent: float[3] x/y/z of target,
+	// overstack_value, is_offcycle: undocumented server data.
 	StateTeleport
 	// StateJump when agent jumps.
-	// src_agent: agent, dst_agent: 1 if leaving platform, 0 on landing.
+	// src_agent: agent, dst_agent: 1 if leaving platform, 0 on landing,
+	// is_offcycle: undocumented server data.
 	StateJump
 	// StateUnknown is any type newer than this list.
 	StateUnknown
