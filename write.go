@@ -1,10 +1,13 @@
 package evtc
 
 import (
+	"archive/zip"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -12,6 +15,29 @@ import (
 // no room for: a build that is not eight bytes long, a revision other than
 // 1, names longer than the 64 bytes of their buffer or holding a null byte.
 var ErrUnwritable = errors.New("evtc: log cannot be written")
+
+// WriteFile writes the log at path: a raw log when the path ends in .evtc,
+// otherwise a zip archive holding it alone, as arcdps compresses its logs.
+// The entry of the archive is named after the file.
+func (l *Log) WriteFile(path string) error {
+	data, err := l.encode()
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(filepath.Ext(path), ".evtc") {
+		return os.WriteFile(path, data, 0o644)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	if err := zipTo(f, name, data); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
 
 // WriteTo writes the log to w in the raw layout of an .evtc file, the one
 // Parse reads back. The bytes of a parsed log are those of its file, the
@@ -24,6 +50,19 @@ func (l *Log) WriteTo(w io.Writer) (int64, error) {
 	}
 	n, err := w.Write(data)
 	return int64(n), err
+}
+
+// zipTo writes an archive holding data as its single entry.
+func zipTo(w io.Writer, name string, data []byte) error {
+	zw := zip.NewWriter(w)
+	entry, err := zw.Create(name)
+	if err != nil {
+		return fmt.Errorf("evtc: create %q: %w", name, err)
+	}
+	if _, err := entry.Write(data); err != nil {
+		return fmt.Errorf("evtc: write %q: %w", name, err)
+	}
+	return zw.Close()
 }
 
 // encode lays the log out as decode reads it.
