@@ -206,3 +206,44 @@ func TestWriteEmpty(t *testing.T) {
 		t.Errorf("read back %+v", back)
 	}
 }
+
+// TestWriteSample writes the real log kept in tests_fixtures/ when present
+// and reads it back.
+func TestWriteSample(t *testing.T) {
+	const path = "tests_fixtures/sabetha-05-fd9b6f3a.zevtc"
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("%s not available", path)
+	}
+	l, err := ParseFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(t.TempDir(), "sabetha.zevtc")
+	if err := l.WriteFile(out); err != nil {
+		t.Fatal(err)
+	}
+	back, err := ParseFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameLog(l, back) {
+		t.Error("the file written reads back another log")
+	}
+}
+
+// BenchmarkEncodeSample measures the binary encoding alone, on the decoded
+// real log.
+func BenchmarkEncodeSample(b *testing.B) {
+	l, err := Parse(bytes.NewReader(sampleBytes(b)))
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		data, err := l.encode()
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.SetBytes(int64(len(data)))
+	}
+}
