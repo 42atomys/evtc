@@ -83,7 +83,7 @@ func TestMustGUIDPanics(t *testing.T) {
 			t.Error("mustGUID accepted a bad literal")
 		}
 	}()
-	mustGUID("bad")
+	MustParseGUID("bad")
 }
 
 func TestGroundMarkers(t *testing.T) {
