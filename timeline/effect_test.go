@@ -11,6 +11,7 @@ func TestEffects(t *testing.T) {
 	b := fixture()
 	g := GUID{0xEF, 0xFE}
 	b.idToGUID(ContentEffect, 5000, g, 2000)
+	b.idToGUID(ContentEffect, 5001, g, 2000)
 	b.groundEffect(1000, addrP1, 5000, 100, Vec3{100, 200, -300}, Vec3{0.5, -0.25, 1}, 0, 1500, true, 3)
 	b.groundEffect(1500, addrBoss, 5001, 101, Vec3{10, 20, 30}, Vec3{}, 4000, 0, false, 0)
 	b.effectRemove(2000, 0, evtc.StateEffectGroundRemove, 101)
@@ -42,7 +43,7 @@ func TestEffects(t *testing.T) {
 		t.Errorf("effect of an unknown source = %+v", f4)
 	}
 	q := tl.Effects()
-	if p1.Effects().Count() != 1 || q.Ground().Count() != 2 || q.Around().Count() != 3 || q.OfID(5002).Count() != 2 || q.By(p2).Count() != 2 || q.By(nil).Count() != 0 || q.By(tl.Unknown).Count() != 1 {
+	if p1.Effects().Count() != 1 || q.Ground().Count() != 2 || q.Around().Count() != 3 || q.OfID(5002).Count() != 2 || q.OfGUID(g).Count() != 2 || q.By(p2).Count() != 2 || q.By(nil).Count() != 0 || q.By(tl.Unknown).Count() != 1 {
 		t.Error("effect filters are wrong")
 	}
 	if q.At(2900*msec).Count() != 2 || q.Between(NewInterval(3200*msec, 3800*msec)).Count() != 1 || q.Reverse().First() != f4 || q.Limit(2).Count() != 2 {

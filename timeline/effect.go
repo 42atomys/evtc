@@ -81,8 +81,14 @@ func (q Effects) By(e Entity) Effects {
 }
 
 // OfID keeps the effects with the given content id.
+// ! the ID are relative to the log, use [OfGUID] for cross log query
 func (q Effects) OfID(id uint32) Effects {
 	return q.Where(func(f *Effect) bool { return f.EffectID == id })
+}
+
+// OfGUID keeps the effects wuth the given game GUID.
+func (q Effects) OfGUID(guid GUID) Effects {
+	return q.Where(func(f *Effect) bool { return f.GUID == guid })
 }
 
 // Ground keeps the effects placed on the ground.
