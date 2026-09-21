@@ -39,7 +39,7 @@ func TestSampleOverview(t *testing.T) {
 	if tl.Build != 20260816 || tl.Duration != 319082*msec || tl.Start.Unix() != 1787685623 || tl.MapID != 1062 {
 		t.Errorf("build %d duration %v start %v map %d", tl.Build, tl.Duration, tl.Start, tl.MapID)
 	}
-	if len(tl.players) != 10 || tl.POV == nil || tl.POV != tl.players[0] || tl.POV.Subgroup != 2 {
+	if len(tl.players) != 10 || tl.POV == nil || tl.POV != tl.characters[0].Player || tl.POV.SubgroupAt(0) != 2 {
 		t.Errorf("players %d pov %v", len(tl.players), tl.POV)
 	}
 	boss := tl.targets[0]
@@ -125,7 +125,7 @@ func TestSampleHealthCrossings(t *testing.T) {
 func TestSampleCastsAndHits(t *testing.T) {
 	tl := loadSample(t)
 	boss := tl.targets[0]
-	target, other := tl.players[sampleDowned], tl.players[sampleMoving]
+	target, other := tl.characters[sampleDowned], tl.characters[sampleMoving]
 
 	casts := boss.Casts().OfSkill(31390).Between(NewInterval(6*time.Second, 7*time.Second))
 	if casts.Count() != 1 {
@@ -162,7 +162,7 @@ func TestSampleCastsAndHits(t *testing.T) {
 
 func TestSampleDownsAndDeaths(t *testing.T) {
 	tl := loadSample(t)
-	downed, killed := tl.players[sampleDowned], tl.players[sampleKilled]
+	downed, killed := tl.characters[sampleDowned], tl.characters[sampleKilled]
 
 	if len(downed.Downs) != 2 || len(downed.Deaths) != 1 {
 		t.Fatalf("downs %d deaths %d", len(downed.Downs), len(downed.Deaths))
@@ -188,7 +188,7 @@ func TestSampleDownsAndDeaths(t *testing.T) {
 
 func TestSamplePositions(t *testing.T) {
 	tl := loadSample(t)
-	p := tl.players[sampleMoving]
+	p := tl.characters[sampleMoving]
 
 	teleports := 0
 	for s := range p.Position.Seq() {
@@ -223,7 +223,7 @@ func TestSamplePositions(t *testing.T) {
 
 func TestSampleBuffs(t *testing.T) {
 	tl := loadSample(t)
-	p := tl.players[sampleMoving]
+	p := tl.characters[sampleMoving]
 
 	closed := tl.Stacks().Where(func(s *BuffStack) bool {
 		return s.Remove != nil && s.Remove.IsStateChange == evtc.StateBuffRemoveSingle
@@ -300,7 +300,7 @@ func BenchmarkBuildSample(b *testing.B) {
 func BenchmarkQuerySample(b *testing.B) {
 	tl := loadSample(b)
 	boss := tl.targets[0]
-	target := tl.players[sampleDowned]
+	target := tl.characters[sampleDowned]
 	iv := NewInterval(6*time.Second, 7*time.Second)
 	b.ReportAllocs()
 	for b.Loop() {

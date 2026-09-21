@@ -40,7 +40,7 @@ func TestSessionAndSquad(t *testing.T) {
 	l := b.build(10000)
 	l.Events[len(l.Events)-1].DstAgent = 1 // the log ended by a map exit
 	tl := mustBuild(t, l)
-	p1, p2 := tl.players[0], tl.players[1]
+	p1, p2 := tl.characters[0], tl.characters[1]
 
 	if tl.Language != LanguageFrench || tl.Language.String() != "French" || Language(1).String() != "Language(1)" || tl.GameBuild != 170000 || tl.ShardID != 1234 || tl.FractalScale != 100 {
 		t.Errorf("session = %v %d %d %d", tl.Language, tl.GameBuild, tl.ShardID, tl.FractalScale)
@@ -63,14 +63,14 @@ func TestSessionAndSquad(t *testing.T) {
 		t.Errorf("markers of p1 = %+v", p1.Markers)
 	}
 	// The markers of p2 are never removed: they end with its lifetime.
-	if len(p2.Markers) != 2 || p2.Markers[0].GUID != (GUID{}) || p2.Markers[0].Interval != NewInterval(2*time.Second, 4*time.Second) || p2.Markers[0].Removed() || p2.Markers[1].Interval != At(4*time.Second) || tl.Commander() != p2 || len(tl.Unknown.Markers) != 0 {
+	if len(p2.Markers) != 2 || p2.Markers[0].GUID != (GUID{}) || p2.Markers[0].Interval != NewInterval(2*time.Second, 4*time.Second) || p2.Markers[0].Removed() || p2.Markers[1].Interval != At(4*time.Second) || tl.Commander() != p2.Player || len(tl.Unknown.Markers) != 0 {
 		t.Errorf("markers of p2 = %+v, commander %v", p2.Markers, tl.Commander())
 	}
-	if tl.CommanderAt(2500*msec) != p1 || tl.CommanderAt(3*time.Second) != p1 || tl.CommanderAt(3500*msec) != nil || tl.CommanderAt(4*time.Second) != p2 || p1.IsCommanderAt(3001*msec) {
+	if tl.CommanderAt(2500*msec) != p1.Player || tl.CommanderAt(3*time.Second) != p1.Player || tl.CommanderAt(3500*msec) != nil || tl.CommanderAt(4*time.Second) != p2.Player || p1.IsCommanderAt(3001*msec) {
 		t.Error("CommanderAt is wrong")
 	}
-	if p1.Guild != guild || guild.String() != "0102030405060708090A0B0C0D0E0F10" || !p2.Guild.IsZero() || p1.Guild.IsZero() {
-		t.Errorf("guild = %v", p1.Guild)
+	if p1.Player.Guild != guild || guild.String() != "0102030405060708090A0B0C0D0E0F10" || !p2.Player.Guild.IsZero() || p1.Player.Guild.IsZero() {
+		t.Errorf("guild = %v", p1.Player.Guild)
 	}
 	if p1.Team.Len() != 3 || held(p1.Team.ValueAt(500*msec)) != 0 || held(p1.Team.ValueAt(2*time.Second)) != 10 || held(p1.Team.ValueAt(4*time.Second)) != 11 || p2.Team.Len() != 0 {
 		t.Errorf("team = %v", p1.Team.All())

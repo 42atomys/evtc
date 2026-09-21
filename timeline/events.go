@@ -33,7 +33,8 @@ func (q Events) Between(iv Interval) Events {
 
 // addresses returns every address that resolves to the agent behind e,
 // so that predicates compare integers instead of looking agents up, or nil
-// for a nil entity.
+// for a nil entity. The characters of a player share their address, and a
+// character matches the events of the others.
 func (q Events) addresses(e Entity) []uint64 {
 	a := ref(e)
 	if a == nil {
@@ -44,7 +45,7 @@ func (q Events) addresses(e Entity) []uint64 {
 	}
 	addrs := []uint64{a.Addr}
 	for old := range q.tl.alias {
-		if old != a.Addr && q.tl.Agent(old) == a {
+		if old != a.Addr && q.tl.canonical(old) == a.Addr {
 			addrs = append(addrs, old)
 		}
 	}

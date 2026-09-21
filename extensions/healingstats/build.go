@@ -68,9 +68,9 @@ func (s *Stats) makeAgents() {
 	s.Unknown = &arena[count]
 	*s.Unknown = Agent{Agent: tl.Unknown, Stats: s}
 	s.byAgent[tl.Unknown] = s.Unknown
-	s.players = make([]*Agent, 0, tl.Players().Count())
-	for p := range tl.Players().Seq() {
-		s.players = append(s.players, s.byAgent[p.Agent])
+	s.players = make([]*Agent, 0, tl.Characters().Count())
+	for c := range tl.Characters().Seq() {
+		s.players = append(s.players, s.byAgent[c.Agent])
 	}
 }
 
@@ -123,7 +123,7 @@ func (s *Stats) merge() []record {
 		pending[k] = list
 	}
 	if tl.POV != nil {
-		pov := tl.POV.Agent
+		pov := tl.POV.Ref()
 		for i := range recs {
 			r := &recs[i]
 			if r.peer != nil && !s.local(r.ev, pov) && s.local(r.peer, pov) {
@@ -163,7 +163,7 @@ func (s *Stats) parties(e *evtc.Event) (src, dst *timeline.Agent) {
 // when neither names an agent.
 func (s *Stats) resolve(addr uint64, inst uint16, t time.Duration) *timeline.Agent {
 	tl := s.Timeline
-	a := tl.Agent(addr)
+	a := tl.AgentOf(addr, inst)
 	if a != nil && a != tl.Unknown && a.Raw != nil {
 		return a
 	}
@@ -292,7 +292,7 @@ func (s *Stats) finish() {
 		}
 	}
 	if pov := s.Timeline.POV; pov != nil {
-		s.byAgent[pov.Agent].Recorded = true
+		s.byAgent[pov.Ref()].Recorded = true
 	}
 	n := 0
 	for _, p := range s.players {

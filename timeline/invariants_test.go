@@ -49,7 +49,7 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 			fail("credited hits of %v: %d, want %d", a, len(a.hitsCredited), want)
 		}
 		for i, h := range a.hitsCredited {
-			if !h.creditedTo(a) {
+			if !h.creditedTo(who{one: a}) {
 				fail("credited hit %d of %v was dealt by %v", i, a, h.Src)
 			}
 			if i > 0 && h.Time < a.hitsCredited[i-1].Time {
@@ -293,8 +293,11 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 				}
 			}
 		}
-		if a.Player != nil && (a.Player.Agent != a || a.Kind != KindPlayer) {
+		if a.Player != nil && a.Kind != KindPlayer {
 			fail("player link of %v is broken", a)
+		}
+		if c := a.Character; c != nil && (c.Agent != a || !slices.Contains(a.Player.characters, c)) {
+			fail("character link of %v is broken", a)
 		}
 		if a.Target != nil && a.Target.Agent != a {
 			fail("target link of %v is broken", a)
@@ -586,8 +589,13 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 		}
 	}
 	for _, p := range tl.players {
-		if p.Agent.Player != p || p.Kind != KindPlayer {
-			fail("player %v is inconsistent", p)
+		if len(p.characters) == 0 || !slices.Contains(p.characters, p.main) {
+			fail("player %v has no main character", p)
+		}
+		for _, c := range p.characters {
+			if c.Player != p || c.Kind != KindPlayer {
+				fail("character %v of %v is inconsistent", c, p)
+			}
 		}
 	}
 	for a := range tl.NPCs().Seq() {
@@ -600,7 +608,7 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 			fail("%v listed as gadget", a)
 		}
 	}
-	if tl.POV != nil && tl.POV.Agent.Player != tl.POV {
+	if tl.POV != nil && tl.POV.Ref().Player != tl.POV {
 		fail("POV is inconsistent")
 	}
 	events := tl.Events().All()
@@ -686,7 +694,7 @@ func TestQueriesAgainstBruteForce(t *testing.T) {
 	casts := tl.Casts().All()
 	stacks := tl.Stacks().All()
 	boss := tl.targets[0]
-	p := tl.players[0]
+	p := tl.characters[0]
 
 	for range 200 {
 		iv := randomInterval()

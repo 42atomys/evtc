@@ -35,7 +35,7 @@ func TestMarkers(t *testing.T) {
 	b.move(6000, addrP1, evtc.StatePosition, 1, 2, 3)
 	b.move(6000, addrP2, evtc.StatePosition, 1, 2, 3)
 	tl := mustBuild(t, b.build(8000))
-	p1, p2, boss := tl.players[0], tl.players[1], tl.Boss()
+	p1, p2, boss := tl.characters[0], tl.characters[1], tl.Boss()
 
 	if len(p1.Markers) != 2 || len(p2.Markers) != 4 || len(boss.Markers) != 1 || len(tl.Unknown.Markers) != 0 {
 		t.Fatalf("markers: p1 %d, p2 %d, boss %d, unknown %d", len(p1.Markers), len(p2.Markers), len(boss.Markers), len(tl.Unknown.Markers))
@@ -68,7 +68,7 @@ func TestMarkers(t *testing.T) {
 		t.Error("IsCommanderAt is wrong")
 	}
 	// Two players wear a tag at 3.5 s: the first in table order answers.
-	if tl.Commander() != p1 || tl.CommanderAt(3500*msec) != p1 || tl.CommanderAt(4800*msec) != p2 || tl.CommanderAt(5*time.Second+msec) != nil || tl.CommanderAt(999*msec) != nil {
+	if tl.Commander() != p1.Player || tl.CommanderAt(3500*msec) != p1.Player || tl.CommanderAt(4800*msec) != p2.Player || tl.CommanderAt(5*time.Second+msec) != nil || tl.CommanderAt(999*msec) != nil {
 		t.Errorf("commander %v, at 3.5s %v", tl.Commander(), tl.CommanderAt(3500*msec))
 	}
 	if tl.Events().Of(evtc.StateMarker).Count() != 14 || tl.Unknown.Events().Of(evtc.StateMarker).Count() != 1 {

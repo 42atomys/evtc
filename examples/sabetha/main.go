@@ -60,15 +60,15 @@ func table() *tabwriter.Writer {
 func overview(tl *timeline.Timeline) {
 	boss := tl.Boss()
 	section("Overview")
-	fmt.Printf("%s, %v, started %s (map %d), recorded by %s\n", boss.Name, tl.Duration.Round(time.Millisecond), tl.Start.Format(time.RFC3339), tl.MapID, tl.POV.Name)
+	fmt.Printf("%s, %v, started %s (map %d), recorded by %s\n", boss.Name, tl.Duration.Round(time.Millisecond), tl.Start.Format(time.RFC3339), tl.MapID, tl.POV.Main().Name)
 	fmt.Printf("boss ends at %.1f%% health, %d events, %d hits, %d casts, %d buff stacks\n", boss.HealthAt(boss.Lifetime.End), tl.Events().Count(), tl.Hits().Count(), tl.Casts().Count(), tl.Stacks().Count())
 
 	w := table()
 	fmt.Fprintln(w, "player\taccount\tgroup\tspec\tboss dps\tdowns\tdeaths\tin combat")
-	for p := range tl.Players().Seq() {
+	for p := range tl.Characters().Seq() {
 		// HitsCredited includes the pets, clones and turrets of the player.
 		dps := p.HitsCredited().On(boss).Landed().DPS(boss.Lifetime)
-		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%.0f\t%d\t%d\t%v\n", p.Name, p.Account, p.Subgroup, p.Spec(), dps, len(p.Downs), len(p.Deaths), p.CombatTime(tl.Interval()).Round(time.Second))
+		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%.0f\t%d\t%d\t%v\n", p.Name, p.Player.Account, p.Player.SubgroupAt(p.Lifetime.End), p.Spec(), dps, len(p.Downs), len(p.Deaths), p.CombatTime(tl.Interval()).Round(time.Second))
 	}
 	w.Flush()
 }
@@ -118,7 +118,7 @@ func downs(tl *timeline.Timeline) {
 	section("Downs and deaths")
 	w := table()
 	fmt.Fprintln(w, "time\tplayer\tevent\tcause\tfrom\toutcome")
-	for p := range tl.Players().Seq() {
+	for p := range tl.Characters().Seq() {
 		for _, d := range p.Downs {
 			cause, from := "?", "?"
 			if d.Cause != nil {
@@ -175,7 +175,7 @@ func boons(tl *timeline.Timeline) {
 	section("Boons (over the time alive)")
 	w := table()
 	fmt.Fprintln(w, "player\talive\tmight avg\tfury\tquickness\talacrity")
-	for p := range tl.Players().Seq() {
+	for p := range tl.Characters().Seq() {
 		// Uptimes are measured while the player was alive: a player who
 		// died early would otherwise look unbuffed.
 		alive := tl.Interval()
@@ -198,7 +198,7 @@ func positioning(tl *timeline.Timeline) {
 	home := boss.PositionAt(10 * time.Second)
 	w := table()
 	fmt.Fprintln(w, "player\tavg\tmax\tcannon trips\taway")
-	for p := range tl.Players().Seq() {
+	for p := range tl.Characters().Seq() {
 		var sum, n, farthest float64
 		var trips int
 		var away, tripStart time.Duration

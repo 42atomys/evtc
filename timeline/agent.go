@@ -3,6 +3,7 @@ package timeline
 import (
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/42atomys/evtc"
@@ -78,11 +79,13 @@ var defianceNames = []string{"Active", "Recover", "Immune", "None"}
 // String returns the state name.
 func (d DefianceState) String() string { return enumString(defianceNames, "DefianceState", int(d)) }
 
-// Entity is anything that stands for an agent: *Agent, *Player and *Target.
-// Query filters accept an Entity so callers never have to unwrap a Player
-// or a Target to reach its Agent. A nil Entity matches nothing.
+// Entity is anything that stands for an agent: *Agent, *Character, *Player
+// and *Target. Query filters accept an Entity so callers never have to
+// unwrap one to reach its Agent. A nil Entity matches nothing, and a
+// player matches through every character.
 type Entity interface {
-	// Ref returns the agent behind the entity.
+	// Ref returns the agent behind the entity, for a player that of their
+	// main character.
 	Ref() *Agent
 }
 
@@ -92,6 +95,42 @@ func ref(e Entity) *Agent {
 		return nil
 	}
 	return e.Ref()
+}
+
+// who is the set of agents an entity stands for: one agent, or the agents
+// of the characters of a player who brought several.
+type who struct {
+	one  *Agent
+	more []*Agent
+}
+
+// agentsOf returns the agents behind an entity.
+func agentsOf(e Entity) who {
+	w := who{one: ref(e)}
+	if p, ok := e.(*Player); ok && p != nil && len(p.characters) > 1 {
+		w.more = p.agents()
+	}
+	return w
+}
+
+// none reports whether the entity was nil.
+func (w who) none() bool { return w.one == nil }
+
+// is reports whether a is one of the agents.
+func (w who) is(a *Agent) bool {
+	if a == nil {
+		return false
+	}
+	return a == w.one || slices.Contains(w.more, a)
+}
+
+// agentAt returns the agent that stood for e at t: the character on the
+// field for a player.
+func agentAt(e Entity, t time.Duration) *Agent {
+	if p, ok := e.(*Player); ok && p != nil {
+		return p.CharacterAt(t).Agent
+	}
+	return ref(e)
 }
 
 // never is the predicate of a filter given a nil entity.
@@ -123,8 +162,10 @@ type Agent struct {
 	SpeciesID uint16
 	// Name is the agent name, in the language of the log.
 	Name string
-	// Player is set when the agent is a player.
+	// Player is the player behind the agent, nil for the other kinds.
 	Player *Player
+	// Character is set when the agent is one of the characters of Player.
+	Character *Character
 	// Target is set when the agent is part of Timeline.Targets().
 	Target *Target
 	// Master is the owner of a minion (pet, clone, mech, turret), nil
@@ -313,32 +354,6 @@ func (a *Agent) String() string {
 	return fmt.Sprintf("%s(%s#%d)", a.Name, a.Kind, a.SpeciesID)
 }
 
-// Player is an agent controlled by a player, with the account data of the
-// agent table. Every Agent method and field is available through the
-// embedded Agent.
-type Player struct {
-	*Agent
-	// Account is the account name without its leading colon.
-	Account string
-	// Subgroup is the squad subgroup, 0 when unknown.
-	Subgroup int
-	// Profession is the profession of the player.
-	Profession Profession
-	// EliteSpec is the elite specialization of the player, EliteNone for
-	// a core build; Spec names the build.
-	EliteSpec EliteSpec
-	// Guild is the guild of the player, zero when unknown.
-	Guild GUID
-}
-
-// Ref returns the agent of the player, or nil for a nil player.
-func (p *Player) Ref() *Agent {
-	if p == nil {
-		return nil
-	}
-	return p.Agent
-}
-
 // Target is an enemy agent of interest: the boss of the log first, then
 // every NPC or gadget that exchanged hits with the players.
 type Target struct {
@@ -421,7 +436,7 @@ func (a *Agent) DefianceStateAt(t time.Duration) DefianceState {
 // at t. It is NaN when e is nil or either position is unknown, so that
 // every comparison with it is false; test it with math.IsNaN.
 func (a *Agent) DistanceTo(e Entity, t time.Duration) float64 {
-	o := ref(e)
+	o := agentAt(e, t)
 	if o == nil {
 		return math.NaN()
 	}
@@ -507,11 +522,11 @@ func (a *Agent) DownsOfSkill(id uint32) []*Down {
 // DownsBy returns the downs whose Cause hit was dealt by e or by one of
 // its minions, nil when there are none or e is nil.
 func (a *Agent) DownsBy(e Entity) []*Down {
-	o := ref(e)
-	if o == nil {
+	w := agentsOf(e)
+	if w.none() {
 		return nil
 	}
-	return a.downs(func(h *Hit) bool { return h.creditedTo(o) })
+	return a.downs(func(h *Hit) bool { return h.creditedTo(w) })
 }
 
 // downs returns the downs whose Cause hit is accepted by p.
@@ -543,11 +558,11 @@ func (a *Agent) DeathsOfSkill(id uint32) []*Death {
 // DeathsBy returns the deaths whose Cause hit was dealt by e or by one of
 // its minions, nil when there are none or e is nil.
 func (a *Agent) DeathsBy(e Entity) []*Death {
-	o := ref(e)
-	if o == nil {
+	w := agentsOf(e)
+	if w.none() {
 		return nil
 	}
-	return a.deaths(func(h *Hit) bool { return h.creditedTo(o) })
+	return a.deaths(func(h *Hit) bool { return h.creditedTo(w) })
 }
 
 // deaths returns the deaths whose Cause hit is accepted by p.

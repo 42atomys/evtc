@@ -39,10 +39,10 @@ func TestBuildBasics(t *testing.T) {
 	if tl.Start.Unix() != 1787685623 || tl.LocalStart.Unix() != 1787685624 || tl.WallClock(2*time.Second).Unix() != 1787685625 {
 		t.Errorf("start %v local %v", tl.Start, tl.LocalStart)
 	}
-	if len(tl.players) != 2 || tl.players[0].Account != "Alpha.1234" || tl.players[0].Subgroup != 1 || tl.players[1].EliteSpec != 65 || tl.players[1].Profession != 2 {
+	if len(tl.players) != 2 || tl.players[0].Account != "Alpha.1234" || tl.players[0].SubgroupAt(0) != 1 || tl.players[1].EliteSpecAt(0) != 65 || tl.characters[1].Profession != 2 {
 		t.Errorf("players = %+v", tl.players)
 	}
-	if tl.POV != tl.players[0] {
+	if tl.POV != tl.characters[0].Player {
 		t.Errorf("POV = %v", tl.POV)
 	}
 	if len(tl.targets) != 2 || !tl.targets[0].Boss || tl.targets[0].SpeciesID != 15375 || tl.targets[1].Name != "Crow" || tl.targets[1].Boss {
@@ -61,11 +61,11 @@ func TestBuildBasics(t *testing.T) {
 	if boss.Lifetime != NewInterval(200*msec, 1500*msec) {
 		t.Errorf("boss lifetime = %v", boss.Lifetime)
 	}
-	if tl.Hits().Count() != 3 || boss.Hits().Count() != 1 || boss.HitsTaken().Count() != 1 || tl.players[0].HitsTaken().Count() != 1 {
+	if tl.Hits().Count() != 3 || boss.Hits().Count() != 1 || boss.HitsTaken().Count() != 1 || tl.characters[0].HitsTaken().Count() != 1 {
 		t.Error("hit edges are wrong")
 	}
-	h := tl.players[0].Hits().First()
-	if h.Dst != boss.Agent || h.Src != tl.players[0].Agent || h.Skill.Name != "Slam" || h.Damage != 500 || !h.IsStrike() || h.IFF != evtc.IFFFoe || h.Time != time.Second {
+	h := tl.characters[0].Hits().First()
+	if h.Dst != boss.Agent || h.Src != tl.characters[0].Agent || h.Skill.Name != "Slam" || h.Damage != 500 || !h.IsStrike() || h.IFF != evtc.IFFFoe || h.Time != time.Second {
 		t.Errorf("hit = %+v", h)
 	}
 	if tl.Skill(skillSlam).Hits().First() != h || tl.Skill(999) != nil || tl.Buff(skillSlam) != nil {
@@ -77,13 +77,13 @@ func TestBuildBasics(t *testing.T) {
 	if len(tl.Skills) != 4 || tl.Skills[0].ID != skillHeat || tl.Skills[3].ID != skillBuff {
 		t.Errorf("skills = %v", tl.Skills)
 	}
-	if tl.Events().Count() != len(tl.events) || tl.Events().Of(evtc.StateCombat).Count() != 3 || boss.Events().Involving(tl.players[1]).Count() != 1 {
+	if tl.Events().Count() != len(tl.events) || tl.Events().Of(evtc.StateCombat).Count() != 3 || boss.Events().Involving(tl.characters[1]).Count() != 1 {
 		t.Error("event queries are wrong")
 	}
-	if got := tl.players[0].Events().Between(NewInterval(900*msec, 1100*msec)).Count(); got != 1 {
+	if got := tl.characters[0].Events().Between(NewInterval(900*msec, 1100*msec)).Count(); got != 1 {
 		t.Errorf("events between = %d", got)
 	}
-	if tl.players[0].String() != "Alpha(Player#0)" || boss.String() != "Sabetha(NPC#15375)" || (*Agent)(nil).String() != "<nil>" {
+	if tl.characters[0].String() != "Alpha(Player#0)" || boss.String() != "Sabetha(NPC#15375)" || (*Agent)(nil).String() != "<nil>" {
 		t.Errorf("String = %q", boss.String())
 	}
 	if tl.Skill(skillSlam).String() != "Slam (200)" || (*Skill)(nil).String() != "<nil>" || (*Buff)(nil).String() != "<nil>" {
@@ -171,7 +171,7 @@ func TestNilEntities(t *testing.T) {
 	if len(tl.targets[0].Breakbars) != 0 {
 		t.Error("unexpected breakbars")
 	}
-	if tl.Hits().By(tl.players[0]).Count() != 1 || tl.Hits().On(tl.targets[0]).Count() != 1 {
+	if tl.Hits().By(tl.characters[0]).Count() != 1 || tl.Hits().On(tl.targets[0]).Count() != 1 {
 		t.Error("non-nil entities did not match")
 	}
 }
@@ -188,7 +188,7 @@ func TestEdgeQueries(t *testing.T) {
 	b.hit(2600, addrP2, addrBoss, skillHeat, 50, evtc.ResultDefianceDamageNormal)
 	b.defianceState(3000, addrBoss, DefianceRecover)
 	tl := mustBuild(t, b.build(10000))
-	p1, boss := tl.players[0], tl.targets[0]
+	p1, boss := tl.characters[0], tl.targets[0]
 
 	c := p1.Casts().First()
 	if c == nil || c.Hits().Count() != 2 || c.Hits().Crits().Count() != 1 || c.Hits().Damage() != 150 || c.Hits().First().Cast != c {
@@ -204,8 +204,8 @@ func TestEdgeQueries(t *testing.T) {
 	if bb.Hits().Count() != 3 || bb.Hits().By(p1).Damage() != 100 || bb.Hits().By(tl.Unknown).Damage() != -10 || bb.Hits().Damage() != 140 {
 		t.Errorf("breakbar hits = %v", bb.Hits().All())
 	}
-	if bb.TotalCC() != 150 || bb.CC(tl.players[1]) != 50 || bb.Hits().Between(NewInterval(2500*msec, 3*time.Second)).Count() != 1 {
-		t.Errorf("CC = %d, p2 %d", bb.TotalCC(), bb.CC(tl.players[1]))
+	if bb.TotalCC() != 150 || bb.CC(tl.characters[1]) != 50 || bb.Hits().Between(NewInterval(2500*msec, 3*time.Second)).Count() != 1 {
+		t.Errorf("CC = %d, p2 %d", bb.TotalCC(), bb.CC(tl.characters[1]))
 	}
 	if cc := bb.CCHits(); cc.Count() != 2 || cc.Damage() != 150 || cc.PerAgent()[0].Agent != p1.Agent || cc.PerAgent()[1].Hits.Damage() != 50 {
 		t.Errorf("CCHits = %v", bb.CCHits().All())
@@ -223,7 +223,7 @@ func TestTimelineLookups(t *testing.T) {
 	b.hit(5000, addrP1, addrAdd2, skillSlam, 10, evtc.ResultStrikeDamageNormal)
 	b.hit(6000, addrP1, addrAdd2, skillSlam, 10, evtc.ResultStrikeDamageNormal)
 	tl := mustBuild(t, b.build(10000))
-	p1, p2 := tl.players[0], tl.players[1]
+	p1, p2 := tl.characters[0], tl.characters[1]
 	add1, add2 := tl.Agent(addrAdd).Target, tl.Agent(addrAdd2).Target
 
 	if boss := tl.Boss(); boss == nil || boss != tl.targets[0] || !boss.Boss || boss.SpeciesID != 15375 {
@@ -250,13 +250,13 @@ func TestTimelineLookups(t *testing.T) {
 		t.Error("TargetBySpeciesIDAt found an unknown species")
 	}
 
-	if tl.PlayerByAccount("Alpha.1234") != p1 || tl.PlayerByAccount(":Alpha.1234") != p1 || tl.PlayerByAccount("Bravo.5678") != p2 || tl.PlayerByAccount("Nobody.0000") != nil {
+	if tl.PlayerByAccount("Alpha.1234") != p1.Player || tl.PlayerByAccount(":Alpha.1234") != p1.Player || tl.PlayerByAccount("Bravo.5678") != p2.Player || tl.PlayerByAccount("Nobody.0000") != nil {
 		t.Error("PlayerByAccount is wrong")
 	}
-	if tl.PlayerByName("Bravo") != p2 || tl.PlayerByName("Alpha") != p1 || tl.PlayerByName("Charlie") != nil {
+	if tl.PlayerByName("Bravo") != p2.Player || tl.PlayerByName("Alpha") != p1.Player || tl.PlayerByName("Charlie") != nil {
 		t.Error("PlayerByName is wrong")
 	}
-	if g := tl.Players().InSubgroup(1); g.Count() != 1 || g.First() != p1 || tl.Players().InSubgroup(2).Count() != 1 || tl.Players().InSubgroup(3).Any() {
+	if g := tl.Players().InSubgroup(1); g.Count() != 1 || g.First() != p1.Player || tl.Players().InSubgroup(2).Count() != 1 || tl.Players().InSubgroup(3).Any() {
 		t.Errorf("InSubgroup(1) = %v", g.All())
 	}
 	if named := tl.Agents().Named("Crow").All(); len(named) != 2 || named[0] != add1.Agent || named[1] != add2.Agent || tl.Agents().Named("Nobody").Any() {
@@ -273,10 +273,10 @@ func TestTimelineLookups(t *testing.T) {
 		t.Error("Agents.AliveAt is wrong")
 	}
 	players := tl.Players()
-	if players.OfProfession(ProfessionWarrior).First() != p2 || players.OfEliteSpec(65).First() != p2 || players.OfEliteSpec(EliteNone).First() != p1 || players.AliveAt(1500*msec).First() != p1 || players.AliveAt(-time.Second).Any() {
+	if players.OfProfession(ProfessionWarrior).First() != p2.Player || players.OfEliteSpec(65).First() != p2.Player || players.OfEliteSpec(EliteNone).First() != p1.Player || players.AliveAt(1500*msec).First() != p1.Player || players.AliveAt(-time.Second).Any() {
 		t.Error("player filters are wrong")
 	}
-	if players.Reverse().First() != p2 || players.Skip(1).First() != p2 || players.Limit(1).Count() != 1 || players.GroupBy(func(p *Player) int { return p.Subgroup })[2].First() != p2 {
+	if players.Reverse().First() != p2.Player || players.Skip(1).First() != p2.Player || players.Limit(1).Count() != 1 || players.GroupBy(func(p *Player) int { return p.SubgroupAt(0) })[2].First() != p2.Player {
 		t.Error("player traversal is wrong")
 	}
 	targets := tl.Targets()

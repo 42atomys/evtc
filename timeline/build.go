@@ -3,6 +3,7 @@ package timeline
 import (
 	"cmp"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -64,7 +65,12 @@ type builder struct {
 
 	counts     []agentCounts
 	srcs, dsts []*Agent
-	bosses     []*Agent
+	// shared holds the addresses that several agent table entries carry.
+	shared map[uint64]*sharedAddr
+	// builds are the subgroup, profession and specialization a player
+	// announced when entering combat, in time order.
+	builds map[*Player][]buildChange
+	bosses []*Agent
 
 	nHits, nCasts, nStacks, nDowns, nDeaths int
 	nEffects, nMissiles, nTicks, nGround    int
@@ -128,6 +134,7 @@ func (b *builder) run() *Timeline {
 	b.collectEvents()
 	b.makeSkills()
 	b.scan()
+	b.dropUnclaimed()
 	b.allocateAgents()
 	b.allocateSkills()
 	b.fill()
@@ -170,6 +177,8 @@ func (b *builder) makeAgents() {
 		}
 	}
 	players := make([]Player, 0, nPlayers)
+	characters := make([]Character, 0, nPlayers)
+	byAccount := make(map[string]*Player, nPlayers)
 	tl.agents = make([]*Agent, len(l.Agents))
 	tl.byAddr = make(map[uint64]*Agent, len(l.Agents)+1)
 	tl.alias = map[uint64]uint64{}
@@ -193,16 +202,17 @@ func (b *builder) makeAgents() {
 		switch {
 		case raw.IsElite != 0xffffffff:
 			a.Kind = KindPlayer
-			sub, _ := strconv.Atoi(raw.Subgroup)
-			players = append(players, Player{
-				Agent:      a,
-				Account:    strings.TrimPrefix(raw.Account, ":"),
-				Subgroup:   sub,
-				Profession: Profession(raw.Profession),
-				EliteSpec:  EliteSpec(raw.IsElite),
-			})
-			a.Player = &players[len(players)-1]
-			tl.players = append(tl.players, a.Player)
+			account := strings.TrimPrefix(raw.Account, ":")
+			p := byAccount[account]
+			if p == nil {
+				players = append(players, Player{Timeline: tl, Account: account})
+				p = &players[len(players)-1]
+				byAccount[account] = p
+				tl.players = append(tl.players, p)
+			}
+			characters = append(characters, Character{Agent: a, Profession: Profession(raw.Profession)})
+			a.Player, a.Character = p, &characters[len(characters)-1]
+			p.characters = append(p.characters, a.Character)
 		case raw.Profession>>16 == 0xffff:
 			a.Kind = KindGadget
 			a.SpeciesID = uint16(raw.Profession)
@@ -213,9 +223,20 @@ func (b *builder) makeAgents() {
 			tl.npcs = append(tl.npcs, a)
 		}
 		tl.agents[i] = a
-		if _, dup := tl.byAddr[a.Addr]; !dup {
+		first, dup := tl.byAddr[a.Addr]
+		if !dup {
 			tl.byAddr[a.Addr] = a
+			continue
 		}
+		s := b.shared[a.Addr]
+		if s == nil {
+			s = &sharedAddr{entries: []*Agent{first}, owner: map[uint16]*Agent{}, cur: first}
+			if b.shared == nil {
+				b.shared = map[uint64]*sharedAddr{}
+			}
+			b.shared[a.Addr] = s
+		}
+		s.entries = append(s.entries, a)
 	}
 	tl.Unknown = &Agent{Timeline: tl, Kind: KindUnknown, Name: "Unknown", idx: len(l.Agents)}
 }
@@ -308,15 +329,187 @@ func (b *builder) aliasAddr(old, updated uint64) {
 	}
 }
 
+// sharedAddr is an address that several agent table entries carry. A
+// player who leaves and comes back keeps their address but gets a new
+// instance id and a new table entry. The table lists the entries in order
+// of appearance, so each new instance id claims the next one. An entry
+// that names the character already on the field is folded into it: the
+// character keeps one agent across its stays.
+type sharedAddr struct {
+	entries []*Agent
+	owner   map[uint16]*Agent
+	// next is the first entry no instance id claimed yet.
+	next int
+	// cur is the agent of the last instance id to appear. Events written
+	// without an instance id go to it.
+	cur *Agent
+	// folded are the entries folded into another one, with the raw time
+	// they came back at.
+	folded []foldedEntry
+}
+
+// foldedEntry is a table entry that named the character already on the
+// field.
+type foldedEntry struct {
+	entry, into *Agent
+	at          uint64
+}
+
+// pick returns the agent an event with the given instance id belongs to.
+// Once every entry is claimed, further instance ids go to the last agent.
+func (s *sharedAddr) pick(inst uint16, at uint64) *Agent {
+	if inst == 0 {
+		return s.cur
+	}
+	a := s.owner[inst]
+	if a == nil {
+		a = s.cur
+		if s.next < len(s.entries) {
+			entry := s.entries[s.next]
+			s.next++
+			if s.next > 1 && sameCharacter(entry, s.cur) {
+				s.folded = append(s.folded, foldedEntry{entry, s.cur, at})
+			} else {
+				a = entry
+			}
+		}
+		s.owner[inst] = a
+		s.cur = a
+	}
+	return a
+}
+
+// sameCharacter reports whether two table entries name the same character.
+func sameCharacter(a, b *Agent) bool {
+	return a.Name == b.Name && a.Raw.Profession == b.Raw.Profession && a.Player == b.Player
+}
+
+// buildChange is the subgroup, profession and specialization of a player
+// from an instant on.
+type buildChange struct {
+	at       time.Duration
+	subgroup int
+	prof     Profession
+	spec     EliteSpec
+	event    *evtc.Event
+}
+
+// tableBuild reads a build from an agent table entry.
+func tableBuild(a *Agent, at time.Duration) buildChange {
+	sub, _ := strconv.Atoi(a.Raw.Subgroup)
+	return buildChange{at: at, subgroup: sub, prof: Profession(a.Raw.Profession), spec: EliteSpec(a.Raw.IsElite)}
+}
+
+// finishPlayers builds the subgroup, profession and specialization spans
+// of the players and merges the nodes of their characters.
+func (b *builder) finishPlayers() {
+	tl := b.tl
+	// A stay is a presence on the field: one per character, and one more
+	// each time a character came back.
+	type stay struct {
+		buildChange
+		c *Character
+	}
+	for _, p := range tl.players {
+		slices.SortStableFunc(p.characters, func(x, y *Character) int { return cmp.Compare(x.Lifetime.Start, y.Lifetime.Start) })
+		var stays []stay
+		for i, c := range p.characters {
+			at := c.Lifetime.Start
+			if i == 0 {
+				at = min(at, 0)
+			}
+			stays = append(stays, stay{tableBuild(c.Agent, at), c})
+		}
+		for _, s := range b.shared {
+			for _, f := range s.folded {
+				if f.into.Player == p {
+					stays = append(stays, stay{tableBuild(f.entry, tl.rel(f.at)), f.into.Character})
+				}
+			}
+		}
+		slices.SortStableFunc(stays, func(x, y stay) int { return cmp.Compare(x.at, y.at) })
+
+		changes := b.builds[p]
+		for i, st := range stays {
+			until := time.Duration(math.MaxInt64)
+			if i+1 < len(stays) {
+				until = stays[i+1].at
+			}
+			// arcdps fills the table when the log ends, so an entry
+			// holds the last build of its stay. What the player
+			// announced first is what the stay started on.
+			last := st.buildChange
+			if len(changes) > 0 && changes[0].at < until {
+				first := changes[0]
+				st.subgroup, st.prof, st.spec = first.subgroup, first.prof, first.spec
+			}
+			p.pushBuild(st.buildChange, tl.Duration)
+			for len(changes) > 0 && changes[0].at < until {
+				last = changes[0]
+				p.pushBuild(last, tl.Duration)
+				changes = changes[1:]
+			}
+			st.c.spec = last.spec
+		}
+		p.merge()
+		tl.characters = append(tl.characters, p.characters...)
+	}
+}
+
+// pushBuild opens a span for each value of c that differs from the one
+// the player held.
+func (p *Player) pushBuild(c buildChange, end time.Duration) {
+	if last, ok := p.Subgroup.Last(); !ok || last.Value != c.subgroup {
+		pushSpan(&p.Subgroup.spans, c.at, end, c.subgroup, c.event)
+	}
+	if last, ok := p.Profession.Last(); !ok || last.Value != c.prof {
+		pushSpan(&p.Profession.spans, c.at, end, c.prof, c.event)
+	}
+	if last, ok := p.EliteSpec.Last(); !ok || last.Value != c.spec {
+		pushSpan(&p.EliteSpec.spans, c.at, end, c.spec, c.event)
+	}
+}
+
+// dropUnclaimed removes from the players the entries that stand for no
+// character: those folded into another entry and those no event reached.
+// A player keeps their first entry when none was reached. The entries stay
+// in the agents, which mirror the table.
+func (b *builder) dropUnclaimed() {
+	for _, p := range b.tl.players {
+		if len(p.characters) == 1 {
+			continue
+		}
+		var kept []*Character
+		for _, c := range p.characters {
+			if b.cnt(c.Agent).seen {
+				kept = append(kept, c)
+			}
+		}
+		if len(kept) == 0 {
+			kept = p.characters[:1]
+		}
+		for _, c := range p.characters {
+			if !slices.Contains(kept, c) {
+				c.Agent.Character = nil
+			}
+		}
+		p.characters = kept
+	}
+}
+
 // resolve returns the agent for an address, synthesizing one for addresses
-// missing from the agent table.
-func (b *builder) resolve(addr uint64) *Agent {
+// missing from the agent table. The instance id tells apart the table
+// entries that share an address.
+func (b *builder) resolve(addr uint64, inst uint16, at uint64) *Agent {
 	tl := b.tl
 	if addr == 0 {
 		return tl.Unknown
 	}
 	addr = tl.canonical(addr)
 	if a := tl.byAddr[addr]; a != nil {
+		if s := b.shared[addr]; s != nil {
+			return s.pick(inst, at)
+		}
 		return a
 	}
 	a := &Agent{Timeline: tl, Addr: addr, Kind: KindUnknown, Name: fmt.Sprintf("Unknown %x", addr), idx: len(b.counts)}
@@ -524,7 +717,7 @@ func (b *builder) scan() {
 		k := e.IsStateChange
 		var src, dst *Agent
 		if srcIsAgent(k) {
-			src = b.resolve(e.SrcAgent)
+			src = b.resolve(e.SrcAgent, e.SrcInstanceID, e.Time)
 			if src == tl.Unknown && e.SrcAgent == 0 && e.SrcInstanceID != 0 && tracksAgent(k) {
 				if a := byInst[e.SrcInstanceID]; a != nil {
 					src = a
@@ -536,7 +729,7 @@ func (b *builder) scan() {
 			}
 		}
 		if dstIsAgent(k) {
-			dst = b.resolve(e.DstAgent)
+			dst = b.resolve(e.DstAgent, e.DstInstanceID, e.Time)
 			if dst != src {
 				b.see(dst, e, e.DstInstanceID)
 			}
@@ -929,6 +1122,18 @@ func (b *builder) allocateAgents() {
 		}
 		tl.byInst[a.InstanceID] = append(list, a)
 	}
+	// A character that came back answers to each of its instance ids.
+	for addr, s := range b.shared {
+		if tl.sharedInst == nil {
+			tl.sharedInst = map[uint64]map[uint16]*Agent{}
+		}
+		tl.sharedInst[addr] = s.owner
+		for inst, a := range s.owner {
+			if inst != a.InstanceID {
+				tl.byInst[inst] = append(tl.byInst[inst], a)
+			}
+		}
+	}
 	for _, list := range tl.byInst {
 		slices.SortStableFunc(list, func(x, y *Agent) int { return cmp.Compare(x.Lifetime.Start, y.Lifetime.Start) })
 	}
@@ -1014,6 +1219,7 @@ func (b *builder) fill() {
 	b.openDown = map[*Agent]*Down{}
 	b.openEffects = map[uint32]*Effect{}
 	b.openMissiles = map[uint32]*Missile{}
+	b.builds = map[*Player][]buildChange{}
 
 	// Every tracked agent starts alive and out of combat.
 	for _, a := range b.allAgents() {
@@ -1104,6 +1310,12 @@ func (b *builder) fill() {
 			}
 		case evtc.StateEnterCombat:
 			pushSpan(&src.InCombat.spans, t, end, true, e)
+			// Older arcdps versions leave the profession out of the event.
+			if p := src.Player; p != nil && e.Value != 0 {
+				b.builds[p] = append(b.builds[p], buildChange{
+					at: t, subgroup: int(e.DstAgent), prof: Profession(e.Value), spec: EliteSpec(e.BuffDamage), event: e,
+				})
+			}
 		case evtc.StateExitCombat:
 			pushSpan(&src.InCombat.spans, t, end, false, e)
 		case evtc.StateTargetable:
@@ -1697,6 +1909,7 @@ func (b *builder) finish() {
 	// without its start begins before that event, so restore the start
 	// order the Between filters rely on.
 	sortedByTime(tl.casts, castStart)
+	b.finishPlayers()
 	for _, a := range agents {
 		sortedByTime(a.casts, castStart)
 	}

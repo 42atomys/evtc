@@ -229,9 +229,11 @@ func (tl *Timeline) Commander() *Player {
 	var best *Player
 	var at time.Duration
 	for _, p := range tl.players {
-		for _, m := range p.Markers {
-			if m.Commander && (best == nil || m.Interval.Start >= at) {
-				best, at = p, m.Interval.Start
+		for _, c := range p.characters {
+			for _, m := range c.Markers {
+				if m.Commander && (best == nil || m.Interval.Start >= at) {
+					best, at = p, m.Interval.Start
+				}
 			}
 		}
 	}

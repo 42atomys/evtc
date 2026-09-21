@@ -118,3 +118,39 @@ func TestHealsRankings(t *testing.T) {
 	}
 	checkInvariants(t, s)
 }
+
+func TestHealsOfPlayerWithTwoCharacters(t *testing.T) {
+	b := fixture()
+	b.register(0, "2.19rc2", 2)
+	b.player(addrBravo, instBravo, "Echo", ":Bravo.5678", "1", 5, 0)
+	b.heal(1000, addrAlpha, addrBravo, skillHeal, 100, fromSrc)
+	b.heal(2000, addrBravo, addrAlpha, skillHeal, 40, fromDst)
+	b.inst[addrBravo] = 88
+	b.heal(3000, addrAlpha, addrBravo, skillHeal, 200, fromSrc)
+	b.heal(4000, addrBravo, addrAlpha, skillHeal, 60, fromDst)
+	s := mustBuild(t, b.build(10000))
+	tl := s.Timeline
+
+	p := tl.PlayerByAccount("Bravo.5678")
+	bravo, echo := tl.CharacterByName("Bravo"), tl.CharacterByName("Echo")
+	if len(p.Characters()) != 2 || echo == nil {
+		t.Fatalf("characters = %v", p.Characters())
+	}
+	q := s.Heals()
+	for _, tt := range []struct {
+		name string
+		q    Heals
+		want []int32
+	}{
+		{"On player", q.On(p), []int32{100, 200}},
+		{"On first character", q.On(bravo), []int32{100}},
+		{"On second character", q.On(echo), []int32{200}},
+		{"By player", q.By(p), []int32{40, 60}},
+		{"CreditedTo player", q.CreditedTo(p), []int32{40, 60}},
+		{"By second character", q.By(echo), []int32{60}},
+	} {
+		if got := amounts(tt.q); !slices.Equal(got, tt.want) {
+			t.Errorf("%s = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}

@@ -28,8 +28,9 @@ are rejected with `timeline.ErrLegacyLog`.
 
 | Node                                      | Reached from                                                        | Points to                                                                                                                                                         |
 | ----------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Timeline`                                | `Build`, `ParseFile`                                                | `Agents()`, `Players()`, `Targets()`, `Skills`, `Buffs`, `POV`, `Unknown`, the raw `Log`                                                                          |
-| `Agent` (`Player`, `Target` wrap it)      | `Timeline`, every node                                              | `Hits()`, `HitsCredited()`, `HitsTaken()`, `Casts()`, `Stacks()`, `StacksApplied()`, `Downs`, `Deaths`, `Breakbars`, `Master`, `Minions`, `Events()`              |
+| `Timeline`                                | `Build`, `ParseFile`                                                | `Agents()`, `Players()`, `Characters()`, `Targets()`, `Skills`, `Buffs`, `POV`, `Unknown`, the raw `Log`                                                          |
+| `Agent` (`Character`, `Target` wrap it)   | `Timeline`, every node                                              | `Hits()`, `HitsCredited()`, `HitsTaken()`, `Casts()`, `Stacks()`, `StacksApplied()`, `Downs`, `Deaths`, `Breakbars`, `Master`, `Minions`, `Events()`              |
+| `Player`                                  | `Timeline.Players()`, `Agent.Player`                                | `Characters()`, `Main()`, `CharacterAt(t)`, `Subgroup`, `Profession`, `EliteSpec`, `Guild`, the queries of `Agent` over every character                           |
 | `Hit`                                     | `Hits` queries                                                      | `Src`, `Dst`, `Skill`, `Cast`, `Down`, `Death`, `Event`                                                                                                           |
 | `Cast`                                    | `Casts` queries                                                     | `Caster`, `Target`, `Skill`, `Hits()`, `Start`, `Stop`                                                                                                            |
 | `BuffStack`                               | `Stacks` queries                                                    | `Buff`, `Applier`, `Receiver`, `RemovedBy`, `Apply`, `Remove`                                                                                                     |
@@ -69,6 +70,14 @@ whole log, `tl.Since(t)`, `tl.Until(t)`, `Around(t, d)` and
 `Interval.Split(times...)` build the usual sub-ranges. `tl.WallClock(t)`
 converts back to server time.
 
+`Players()` holds one player per account and `Characters()` the characters
+they brought on the field, one each unless someone swapped during the log.
+A character wraps the agent that holds its positions, health, downs and
+markers; a player holds the account, the guild and, as spans, the subgroup,
+profession and elite specialization, which change during a log. The
+queries of a player (`Hits()`, `Casts()`, `Stacks()`...) cover every
+character.
+
 `Targets()` returns the boss of the log first, then every NPC or gadget that
 exchanged hits with the players. `tl.Unknown` is the sentinel agent behind
 hits and events whose source the log does not know; it is never nil.
@@ -99,7 +108,8 @@ hits and events whose source the log does not know; it is never nil.
 - **Movement gaps.** arcdps only samples an agent that moves. Across a gap
   wider than `MoveGap` the last position is held: the agent stood still.
 - **Entities.** Every filter taking an agent accepts a `*Agent`, a
-  `*Player` or a `*Target`; a nil one matches nothing.
+  `*Character`, a `*Player` or a `*Target`; a player matches through every
+  character and a nil entity matches nothing.
 - **Damage.** `Hit.Damage` is the damage as arcdps logs it, health and
   barrier parts combined; `Barrier` is the part absorbed by barrier and
   `HealthDamage()` the rest. Sums on queries follow the same names.
@@ -109,7 +119,8 @@ hits and events whose source the log does not know; it is never nil.
   side; `DownsOf(skill)` and `DownsBy(entity)` compare that single hit.
 - **Instance ids** are reused by successive agents, so `tl.AgentAt(id, t)`
   and `tl.TargetBySpeciesIDAt(id, t)` resolve them against lifetimes with
-  `InstanceTolerance` (300 ms) of slack.
+  `InstanceTolerance` (300 ms) of slack. The characters of a player share
+  their address; `tl.AgentOf(addr, id)` picks the one an event names.
 - **Minions.** `Agent.Hits()` holds the hits of the agent itself;
   `HitsCredited()` adds those of its pets, clones, turrets and mechs, which
   is what a damage meter shows. `PerAgent` credits minions the same way.
@@ -194,10 +205,11 @@ fmt.Println("arcdps build", tl.Build, "events", tl.Events().Count(), "hits", tl.
 
 ```go
 for p := range tl.Players().Seq() {
-	fmt.Println(p.Name, p.Account, "group", p.Subgroup, p.Spec())
+	c := p.Main()
+	fmt.Println(c.Name, p.Account, "group", p.SubgroupAt(0), c.Spec())
 }
-fmt.Println(tl.PlayerByAccount("Bravo.5678").Toughness, tl.PlayerByName("Nobody") == nil)
-fmt.Println(tl.Players().InSubgroup(2).First().Name, tl.Players().OfProfession(timeline.ProfessionGuardian).Count())
+fmt.Println(tl.CharacterByName("Bravo").Toughness, tl.PlayerByName("Nobody") == nil)
+fmt.Println(tl.Players().InSubgroup(2).First().Main().Name, tl.Players().OfProfession(timeline.ProfessionGuardian).Count())
 // Alpha Alpha.1234 group 1 Firebrand
 // Bravo Bravo.5678 group 2 Warrior
 // 1500 true
@@ -206,7 +218,7 @@ fmt.Println(tl.Players().InSubgroup(2).First().Name, tl.Players().OfProfession(t
 
 ```go
 fmt.Println(tl.AgentAt(instBoss, time.Second), tl.TargetBySpeciesIDAt(15375, time.Second).Boss)
-fmt.Println(tl.Agent(alpha).Player.Spec(), tl.Agent(0xdead) == nil)
+fmt.Println(tl.Agent(alpha).Character.Spec(), tl.Agent(0xdead) == nil)
 // Sabetha(NPC#15375) true
 // Firebrand true
 ```
@@ -266,7 +278,7 @@ bosses that phase through invulnerability.
 ### From a cast to its hits
 
 ```go
-alpha, boss := tl.Players().First(), tl.Boss()
+alpha, boss := tl.Characters().First(), tl.Boss()
 cast := alpha.Casts().OfSkill(slam).First()
 fmt.Println(cast.Skill, cast.Interval, "completed:", cast.Completed())
 fmt.Println("hits:", cast.Hits().Count(), "crit:", cast.Hits().Crits().Count(), "damage:", cast.Hits().Damage())
@@ -282,7 +294,7 @@ so projectiles landing after the animation are still attributed.
 ### Positions and distances
 
 ```go
-alpha, boss := tl.Players().First(), tl.Boss()
+alpha, boss := tl.Characters().First(), tl.Boss()
 at := time.Second
 fmt.Println(alpha.PositionAt(at), boss.PositionAt(at))
 fmt.Printf("%.0f units apart\n", alpha.DistanceTo(boss, at))
@@ -295,7 +307,7 @@ fmt.Println("unknown:", math.IsNaN(alpha.DistanceTo(boss, 10*time.Second)))
 ### Buff stacks and uptime
 
 ```go
-alpha := tl.Players().First()
+alpha := tl.Characters().First()
 stacks := alpha.Stacks().OfBuff(timeline.BuffMight)
 fmt.Println("might stacks:", stacks.Count(), "at 2s:", stacks.CountAt(2*time.Second), "at 3s:", stacks.CountAt(3*time.Second))
 fmt.Println("uptime:", stacks.Uptime(tl.Interval()), "average:", stacks.Average(tl.Interval()), "applied by", stacks.First().Applier.Name)
@@ -306,7 +318,7 @@ fmt.Println("uptime:", stacks.Uptime(tl.Interval()), "average:", stacks.Average(
 ### Downs, deaths and life state
 
 ```go
-bravo := tl.Players().Skip(1).First()
+bravo := tl.Characters().Skip(1).First()
 down := bravo.Downs[0]
 fmt.Println(bravo.Name, "down", down.Interval, "by", down.Cause.Skill.Name, "from", down.Cause.Src.Name, "recovered:", down.Recovered)
 fmt.Println(bravo.IsDownAt(2500*time.Millisecond), bravo.DownedBetween(tl.Since(4*time.Second)), len(bravo.DownsOf(tl.Skill(flak))), len(bravo.DownsBy(tl.Boss())))
@@ -317,10 +329,10 @@ fmt.Println("life at 2.5s:", bravo.LifeStateAt(2500*time.Millisecond), "died:", 
 ```
 
 ```go
-bravo := tl.Players().Skip(1).First()
+bravo := tl.Characters().Skip(1).First()
 died, _ := bravo.DiedAt()
 fmt.Println("alive", bravo.AliveTime(tl.Interval()), "down", bravo.DownTime(tl.Interval()), "died:", died)
-fmt.Println("in combat", tl.Players().First().CombatTime(tl.Interval()))
+fmt.Println("in combat", tl.Characters().First().CombatTime(tl.Interval()))
 // alive 3.2s down 800ms died: 0s
 // in combat 0s
 ```
@@ -365,7 +377,7 @@ fmt.Println("second landed hit:", tl.Hits().Landed().Skip(1).First().Damage)
 ### Raw events
 
 ```go
-bravo := tl.Players().Skip(1).First()
+bravo := tl.Characters().Skip(1).First()
 e := tl.Events().Involving(bravo).Of(evtc.StateChangeDown).First()
 fmt.Println(tl.TimeOf(e), e.IsStateChange, "src", e.SrcAgent == bravo.Addr)
 fmt.Println(bravo.Events().Count(), "events involve", bravo.Name)
@@ -381,8 +393,8 @@ several fields.
 ### Session, squad and weapon sets
 
 ```go
-fmt.Println("commander:", tl.Commander().Name, "| language:", tl.Language, "| game build:", tl.GameBuild)
-alpha := tl.Players().First()
+fmt.Println("commander:", tl.Commander().Main().Name, "| language:", tl.Language, "| game build:", tl.GameBuild)
+alpha := tl.Characters().First()
 fmt.Println("weapon swaps:", alpha.WeaponSet.Len()-1, "| set at 3s:", alpha.WeaponSetAt(3*time.Second))
 // commander: Alpha | language: French | game build: 205780
 // weapon swaps: 1 | set at 3s: 1
@@ -391,12 +403,12 @@ fmt.Println("weapon swaps:", alpha.WeaponSet.Len()-1, "| set at 3s:", alpha.Weap
 ### Squad markers and the commander tag
 
 ```go
-bravo := tl.Players().Skip(1).First()
+bravo := tl.Characters().Skip(1).First()
 m := bravo.Markers[0]
 fmt.Println(m.Squad, "on", bravo.Name, m.Interval, "removed:", m.Removed(), "| at 2s:", bravo.SquadMarkerAt(2*time.Second), "| at 4s:", bravo.SquadMarkerAt(4*time.Second))
 heart := tl.GroundMarkerAt(timeline.SquadHeart, 2500*time.Millisecond)
 fmt.Println("heart on the ground at", heart.Position, heart.Interval, "| placements:", len(tl.GroundMarkers))
-fmt.Println("commander at 1s:", tl.CommanderAt(time.Second).Name, "| tag:", tl.Commander().Markers[0].Tag)
+fmt.Println("commander at 1s:", tl.CommanderAt(time.Second).Main().Name, "| tag:", tl.Commander().Main().Markers[0].Tag)
 // Heart on Bravo [1s, 3s] removed: true | at 2s: Heart | at 4s: None
 // heart on the ground at {100 100 0} [2s, 4s] | placements: 2
 // commander at 1s: Alpha | tag: Red
@@ -433,7 +445,7 @@ fmt.Println(len(m.Launches), "launch at", m.Launches[0].Time, "towards", m.Launc
 ```go
 boss := tl.Boss()
 fmt.Println("animations:", len(boss.GadgetAnimations), "| name shown at 1s:", boss.IsNameVisibleAt(time.Second), "| at 4s:", boss.IsNameVisibleAt(4*time.Second))
-fmt.Println("alpha airborne at 1.2s:", tl.Players().First().IsAirborneAt(1200*time.Millisecond), "| rewards:", len(tl.Rewards))
+fmt.Println("alpha airborne at 1.2s:", tl.Characters().First().IsAirborneAt(1200*time.Millisecond), "| rewards:", len(tl.Rewards))
 // animations: 1 | name shown at 1s: true | at 4s: false
 // alpha airborne at 1.2s: true | rewards: 1
 ```
@@ -489,7 +501,7 @@ natural expiries are single removals.
 
 ```go
 cleansed := tl.Stacks().RemovedBy(player).Where(func(s *timeline.BuffStack) bool {
-	return s.Receiver != player.Agent && s.Removal == evtc.BuffRemoveManual && s.Buff.IsCondition()
+	return s.Receiver.Player != player && s.Removal == evtc.BuffRemoveManual && s.Buff.IsCondition()
 })
 ```
 
@@ -523,7 +535,7 @@ The builder follows the field layout of the arcdps `README.txt`
 | arcdps state change                                                                                 | fields used                                                                                                                                                                                                                                                                                        | graph                                                                                                                                                                                        |
 | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CBTS_COMBAT`                                                                                       | `src_agent`, `dst_agent`, `value` (strike damage) or `buff_dmg` (buff tick), `overstack_value` (barrier part when `is_shields`), `skillid`, `result`, `iff`, `buff`, `is_ninety`, `is_fifty`, `is_moving` (bit 0 source, bit 1 target), `is_flanking`, `is_shields`, `is_offcycle` (target downed) | `Hit`                                                                                                                                                                                        |
-| `ENTERCOMBAT`, `EXITCOMBAT`                                                                         | `src_agent`                                                                                                                                                                                                                                                                                        | `Agent.InCombat`                                                                                                                                                                             |
+| `ENTERCOMBAT`, `EXITCOMBAT`                                                                         | `src_agent`; on entering, `dst_agent` subgroup, `value` profession and `buff_dmg` elite specialization                                                                                                                                                                                             | `Agent.InCombat`, `Player.Subgroup`, `Profession`, `EliteSpec`                                                                                                                               |
 | `CHANGEUP`, `CHANGEDOWN`, `CHANGEDEAD`, `SPAWN`, `DESPAWN`                                          | `src_agent`                                                                                                                                                                                                                                                                                        | `Agent.Life`, `Downs`, `Deaths`                                                                                                                                                              |
 | `HEALTHPCTUPDATE`, `BARRIERPCTUPDATE`                                                               | `dst_agent` = percent × 10000                                                                                                                                                                                                                                                                      | `Agent.Health`, `Agent.Barrier` (0 to 100)                                                                                                                                                   |
 | `MAXHEALTHUPDATE`                                                                                   | `dst_agent`                                                                                                                                                                                                                                                                                        | `Agent.MaxHealth`                                                                                                                                                                            |

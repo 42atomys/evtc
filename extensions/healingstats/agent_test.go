@@ -16,7 +16,7 @@ func TestAgentNode(t *testing.T) {
 	s := mustBuild(t, b.build(10000))
 	tl := s.Timeline
 	alpha := s.Agent(tl.POV)
-	if alpha == nil || alpha.Name != "Alpha" || alpha.Stats != s || alpha.Agent != tl.POV.Agent || alpha.Ref() != tl.POV.Agent || !alpha.IsPlayer() || alpha.Player != tl.POV || !alpha.Recorded {
+	if alpha == nil || alpha.Name != "Alpha" || alpha.Stats != s || alpha.Agent != tl.POV.Ref() || alpha.Ref() != tl.POV.Ref() || !alpha.IsPlayer() || alpha.Player != tl.POV || !alpha.Recorded {
 		t.Fatalf("alpha = %+v", alpha)
 	}
 	// The node is an entity of the timeline.

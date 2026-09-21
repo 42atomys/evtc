@@ -29,7 +29,7 @@ func TestBuildReleasesMemory(t *testing.T) {
 	// Exercise the queries too, so that any cache they might keep is
 	// included in the measurement.
 	tl.targets[0].Casts().Hits().Blocked().Count()
-	tl.players[0].Stacks().Uptime(tl.Interval())
+	tl.characters[0].Stacks().Uptime(tl.Interval())
 	tl.targets[0].Health.Crossings(50)
 	withGraph := heapLive()
 	runtime.KeepAlive(tl)
@@ -68,7 +68,7 @@ func TestConcurrentQueries(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p := tl.players[g%len(tl.players)]
+			p := tl.characters[g%len(tl.characters)]
 			for i := range 200 {
 				at := time.Duration(i) * 250 * time.Millisecond
 				iv := NewInterval(at, at+5*time.Second)

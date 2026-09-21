@@ -101,7 +101,7 @@ func TestSampleRankings(t *testing.T) {
 	if merged.Count() != 140 {
 		t.Fatalf("merged heals = %d", merged.Count())
 	}
-	pov := tl.POV.Agent
+	pov := tl.POV.Ref()
 	for h := range merged.Seq() {
 		local := (h.Event.IsOffcycle&flagFromSrc != 0 && credited(h.Src.Agent) == pov) || (h.Event.IsOffcycle&flagFromDst != 0 && credited(h.Dst.Agent) == pov)
 		peer := (h.PeerEvent.IsOffcycle&flagFromSrc != 0 && credited(h.Src.Agent) == pov) || (h.PeerEvent.IsOffcycle&flagFromDst != 0 && credited(h.Dst.Agent) == pov)

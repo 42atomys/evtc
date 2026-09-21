@@ -125,8 +125,9 @@ func (h *Hit) Credited() *Agent {
 	return h.Src
 }
 
-// creditedTo reports whether a is the source of the hit or its master.
-func (h *Hit) creditedTo(a *Agent) bool { return h.Src == a || h.Src.Master == a }
+// creditedTo reports whether the source of the hit or its master is one
+// of the agents of w.
+func (h *Hit) creditedTo(w who) bool { return w.is(h.Src) || w.is(h.Src.Master) }
 
 // IsSignal reports whether the event is an on-skill-use signal rather
 // than a hit.
@@ -146,29 +147,29 @@ func (q Hits) Between(iv Interval) Hits {
 
 // By keeps the hits dealt by e.
 func (q Hits) By(e Entity) Hits {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.none() {
 		return q.Where(never[Hit])
 	}
-	return q.Where(func(h *Hit) bool { return h.Src == a })
+	return q.Where(func(h *Hit) bool { return w.is(h.Src) })
 }
 
 // CreditedTo keeps the hits dealt by e or by one of its minions.
 func (q Hits) CreditedTo(e Entity) Hits {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.none() {
 		return q.Where(never[Hit])
 	}
-	return q.Where(func(h *Hit) bool { return h.creditedTo(a) })
+	return q.Where(func(h *Hit) bool { return h.creditedTo(w) })
 }
 
 // On keeps the hits received by e.
 func (q Hits) On(e Entity) Hits {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.none() {
 		return q.Where(never[Hit])
 	}
-	return q.Where(func(h *Hit) bool { return h.Dst == a })
+	return q.Where(func(h *Hit) bool { return w.is(h.Dst) })
 }
 
 // OfSkill keeps the hits of the skill id.

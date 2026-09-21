@@ -44,7 +44,7 @@ func BenchmarkBuildSynthetic(b *testing.B) {
 
 func BenchmarkPositionAt(b *testing.B) {
 	tl := benchLog(b)
-	p := tl.players[0]
+	p := tl.characters[0]
 	b.ReportAllocs()
 	for i := 0; b.Loop(); i++ {
 		p.Position.At(time.Duration(i%300) * time.Second)
@@ -62,7 +62,7 @@ func BenchmarkHealthAt(b *testing.B) {
 
 func BenchmarkStateAt(b *testing.B) {
 	tl := benchLog(b)
-	p := tl.players[0]
+	p := tl.characters[0]
 	b.ReportAllocs()
 	for i := 0; b.Loop(); i++ {
 		p.LifeStateAt(time.Duration(i%300) * time.Second)
@@ -71,7 +71,7 @@ func BenchmarkStateAt(b *testing.B) {
 
 func BenchmarkAgentAt(b *testing.B) {
 	tl := benchLog(b)
-	p := tl.players[0]
+	p := tl.characters[0]
 	b.ReportAllocs()
 	for i := 0; b.Loop(); i++ {
 		tl.AgentAt(p.InstanceID, time.Duration(i%300)*time.Second)
@@ -89,7 +89,7 @@ func BenchmarkHitsBetween(b *testing.B) {
 
 func BenchmarkHitsFiltered(b *testing.B) {
 	tl := benchLog(b)
-	boss, p := tl.targets[0], tl.players[0]
+	boss, p := tl.targets[0], tl.characters[0]
 	b.ReportAllocs()
 	for b.Loop() {
 		boss.HitsTaken().By(p).Strikes().Damage()
@@ -108,7 +108,7 @@ func BenchmarkCastsHits(b *testing.B) {
 
 func BenchmarkStacksCountAt(b *testing.B) {
 	tl := benchLog(b)
-	p := tl.players[0]
+	p := tl.characters[0]
 	b.ReportAllocs()
 	for i := 0; b.Loop(); i++ {
 		p.Stacks().CountAt(time.Duration(i%300) * time.Second)
@@ -117,7 +117,7 @@ func BenchmarkStacksCountAt(b *testing.B) {
 
 func BenchmarkStacksUptime(b *testing.B) {
 	tl := benchLog(b)
-	p := tl.players[0]
+	p := tl.characters[0]
 	span := tl.Interval()
 	b.ReportAllocs()
 	for b.Loop() {
@@ -147,7 +147,7 @@ func BenchmarkGroupByDamage(b *testing.B) {
 
 func BenchmarkEventsInvolving(b *testing.B) {
 	tl := benchLog(b)
-	p := tl.players[0]
+	p := tl.characters[0]
 	iv := NewInterval(0, 30*time.Second)
 	b.ReportAllocs()
 	for b.Loop() {

@@ -22,7 +22,7 @@ func TestBuffIDs(t *testing.T) {
 	b := fixture()
 	b.buffApply(1000, addrP2, addrP1, BuffMight, 1000, 1)
 	tl := mustBuild(t, b.build(5000))
-	if tl.Buff(BuffMight) == nil || tl.Buff(BuffMight).Skill.Name != "Might" || tl.Skill(BuffBurning).Name != "Burning" || tl.players[0].Stacks().OfBuff(BuffMight).Count() != 1 {
+	if tl.Buff(BuffMight) == nil || tl.Buff(BuffMight).Skill.Name != "Might" || tl.Skill(BuffBurning).Name != "Burning" || tl.characters[0].Stacks().OfBuff(BuffMight).Count() != 1 {
 		t.Error("the fixture ids do not match the constants")
 	}
 }

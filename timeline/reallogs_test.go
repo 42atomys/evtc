@@ -293,7 +293,7 @@ func smoke(t *testing.T, name string, tl *Timeline) {
 	}()
 	iv := tl.Interval()
 	instants := []time.Duration{0, tl.Duration / 3, tl.Duration / 2, tl.Duration, tl.Duration + time.Second, -time.Second}
-	for _, p := range tl.players {
+	for _, p := range tl.characters {
 		for _, at := range instants {
 			p.PositionAt(at)
 			p.HealthAt(at)
@@ -328,8 +328,8 @@ func smoke(t *testing.T, name string, tl *Timeline) {
 		p.Spec()
 		p.GlidingTime(iv)
 		p.AirborneTime(iv)
-		if len(tl.players) > 1 {
-			p.DistanceTo(tl.players[0], tl.Duration/2)
+		if len(tl.characters) > 1 {
+			p.DistanceTo(tl.characters[0], tl.Duration/2)
 		}
 	}
 	if boss := tl.Boss(); boss != nil {
@@ -445,7 +445,7 @@ func sanity(tl *Timeline) []string {
 		out = append(out, fmt.Sprintf("%d health samples outside 0..100", badHealth))
 	}
 	noCause := 0
-	for _, p := range tl.players {
+	for _, p := range tl.characters {
 		for _, d := range p.Deaths {
 			if d.Cause == nil {
 				noCause++
@@ -466,7 +466,7 @@ func sanity(tl *Timeline) []string {
 		out = append(out, fmt.Sprintf("%d map changes, %d rewards, %d integrity messages", len(tl.MapChanges), len(tl.Rewards), len(tl.Integrity)))
 	}
 	jumps := 0
-	for _, p := range tl.players {
+	for _, p := range tl.characters {
 		jumps += p.Airborne.Len()
 	}
 	if jumps > 0 {

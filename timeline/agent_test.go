@@ -25,7 +25,7 @@ func TestAgentStates(t *testing.T) {
 	b.stealth(100, 0, 1)
 	b.stunBreak(100, 0, 10)
 	tl := mustBuild(t, b.build(10000))
-	p1, p2 := tl.players[0], tl.players[1]
+	p1, p2 := tl.characters[0], tl.characters[1]
 
 	if p1.WeaponSet.Len() != 3 || held(p1.WeaponSet.ValueAt(time.Second)) != 0 || held(p1.WeaponSet.ValueAt(3*time.Second)) != 1 || held(p1.WeaponSet.ValueAt(7*time.Second)) != 0 || p2.WeaponSet.Len() != 0 {
 		t.Errorf("weapon sets = %v", p1.WeaponSet.All())
@@ -73,7 +73,7 @@ func TestGadgetsAndJumps(t *testing.T) {
 	b.jump(100, 0, true)
 	b.gadgetName(100, 0, 1)
 	tl := mustBuild(t, b.build(5000))
-	gad, p1, p2, boss := tl.Agent(addrGad), tl.players[0], tl.players[1], tl.Boss()
+	gad, p1, p2, boss := tl.Agent(addrGad), tl.characters[0], tl.characters[1], tl.Boss()
 
 	if gad.NameVisible.Len() != 3 || !gad.IsNameVisibleAt(1500*msec) || gad.IsNameVisibleAt(2500*msec) || gad.IsNameVisibleAt(3500*msec) || gad.IsNameVisibleAt(500*msec) || boss.IsNameVisibleAt(1500*msec) {
 		t.Errorf("name visibility = %v", gad.NameVisible.All())
@@ -107,7 +107,7 @@ func TestStatesEndWithLifetime(t *testing.T) {
 	b.teamChange(1000, addrP1, 5, 0)
 	b.move(3000, addrP1, evtc.StatePosition, 1, 2, 3)
 	tl := mustBuild(t, b.build(5000))
-	gad, p1 := tl.Agent(addrGad), tl.players[0]
+	gad, p1 := tl.Agent(addrGad), tl.characters[0]
 
 	if !gad.IsNameVisibleAt(1500*msec) || gad.IsNameVisibleAt(2500*msec) || gad.NameVisibleTime(tl.Interval()) != time.Second || gad.LifeStateAt(2500*msec) != LifeGone {
 		t.Errorf("gadget name visibility after despawn: %v, life %v", gad.NameVisible.All(), gad.Life.All())
@@ -140,7 +140,7 @@ func TestPointHelpers(t *testing.T) {
 	b.targetable(1000, addrBoss, true)
 	b.targetable(3000, addrBoss, false)
 	tl := mustBuild(t, b.build(10000))
-	p1, p2, boss := tl.players[0], tl.players[1], tl.targets[0]
+	p1, p2, boss := tl.characters[0], tl.characters[1], tl.targets[0]
 	at := 1500 * msec
 
 	if p1.PositionAt(at) != (Vec3{50, 0, 0}) || p1.PositionAt(3*time.Second) != (Vec3{100, 0, 0}) {
@@ -211,7 +211,7 @@ func TestHealthHelpers(t *testing.T) {
 	b.health(5000, addrBoss, 20)
 	b.health(2000, addrP1, 50)
 	tl := mustBuild(t, b.build(10000))
-	boss, p1, p2 := tl.targets[0], tl.players[0], tl.players[1]
+	boss, p1, p2 := tl.targets[0], tl.characters[0], tl.characters[1]
 
 	got := boss.HealthCrossings(66.6, 33.3)
 	want := []struct {
@@ -280,7 +280,7 @@ func TestLifeHelpers(t *testing.T) {
 	b.hit(8000, addrBoss, addrP1, skillSlam, 0, evtc.ResultKillingBlow)
 	b.state(8000, addrP1, evtc.StateChangeDead)
 	tl := mustBuild(t, b.build(10000))
-	p1, p2 := tl.players[0], tl.players[1]
+	p1, p2 := tl.characters[0], tl.characters[1]
 	heat, slam := tl.Skill(skillHeat), tl.Skill(skillSlam)
 	if len(p1.Downs) != 2 || len(p1.Deaths) != 1 {
 		t.Fatalf("downs %d deaths %d", len(p1.Downs), len(p1.Deaths))
@@ -358,7 +358,7 @@ func TestPhasesByHealth(t *testing.T) {
 	b.hit(9000, addrP1, addrBoss, skillSlam, 1, evtc.ResultStrikeDamageNormal)
 	b.health(2000, addrP1, 50)
 	tl := mustBuild(t, b.build(10000))
-	boss, p1 := tl.targets[0], tl.players[0]
+	boss, p1 := tl.targets[0], tl.characters[0]
 	life := boss.Lifetime
 	if life != NewInterval(200*msec, 9*time.Second) {
 		t.Fatalf("lifetime = %v", life)
@@ -397,7 +397,7 @@ func TestPhasesByBuff(t *testing.T) {
 	b.buffApply(0, addrP2, addrP1, skillBuff, 2000, 5)
 	b.buffRemoveSingle(2000, addrP1, 0, skillBuff, 0, 5, evtc.BuffRemoveSingle)
 	tl := mustBuild(t, b.build(10000))
-	boss, p1 := tl.targets[0], tl.players[0]
+	boss, p1 := tl.targets[0], tl.characters[0]
 
 	want := []Interval{NewInterval(200*msec, time.Second), NewInterval(4*time.Second, 6*time.Second), NewInterval(7*time.Second, 9*time.Second)}
 	if got := boss.PhasesByBuff(skillBuff); !slices.Equal(got, want) {
@@ -423,7 +423,7 @@ func TestMinions(t *testing.T) {
 	b.minionHit(2100, addrPet, addrBoss, instP1, skillHeat, 25)
 	tl := mustBuild(t, b.build(10000))
 
-	p1, pet := tl.players[0], tl.Agent(addrPet)
+	p1, pet := tl.characters[0], tl.Agent(addrPet)
 	if pet.Master != p1.Agent || len(p1.Minions) != 1 || p1.Minions[0] != pet || len(pet.Minions) != 0 {
 		t.Errorf("pet master = %v minions = %v", pet.Master, p1.Minions)
 	}
@@ -449,7 +449,7 @@ func TestUnknownAgents(t *testing.T) {
 	if ghost.Kind != KindUnknown || ghost.Addr != 0xabcd || ghost.Name != "Unknown abcd" || ghost.Raw != nil || tl.Agent(0xabcd) != ghost {
 		t.Errorf("ghost = %+v", ghost)
 	}
-	p1 := tl.players[0]
+	p1 := tl.characters[0]
 	if p1.HitsTaken().First().Src != ghost || p1.HitsTaken().Last().Src != tl.Unknown || tl.Unknown.Hits().Count() != 1 || tl.Unknown.StacksApplied().Count() != 1 {
 		t.Error("unknown sources are wrong")
 	}

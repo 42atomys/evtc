@@ -77,8 +77,9 @@ func (h *Heal) Credited() *Agent {
 	return h.Src
 }
 
-// creditedTo reports whether a is the source of the heal or its master.
-func (h *Heal) creditedTo(a *timeline.Agent) bool { return h.Src.Agent == a || h.Src.Master == a }
+// creditedTo reports whether the source of the heal or its master is one
+// of the agents of w.
+func (h *Heal) creditedTo(w who) bool { return w.is(h.Src.Agent) || w.is(h.Src.Master) }
 
 // Self reports whether the agent healed itself.
 func (h *Heal) Self() bool { return h.Src == h.Dst }
@@ -126,29 +127,29 @@ func never(*Heal) bool { return false }
 
 // By keeps the heals dealt by e.
 func (q Heals) By(e timeline.Entity) Heals {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.one == nil {
 		return q.Where(never)
 	}
-	return q.Where(func(h *Heal) bool { return h.Src.Agent == a })
+	return q.Where(func(h *Heal) bool { return w.is(h.Src.Agent) })
 }
 
 // CreditedTo keeps the heals dealt by e or by one of its minions.
 func (q Heals) CreditedTo(e timeline.Entity) Heals {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.one == nil {
 		return q.Where(never)
 	}
-	return q.Where(func(h *Heal) bool { return h.creditedTo(a) })
+	return q.Where(func(h *Heal) bool { return h.creditedTo(w) })
 }
 
 // On keeps the heals received by e.
 func (q Heals) On(e timeline.Entity) Heals {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.one == nil {
 		return q.Where(never)
 	}
-	return q.Where(func(h *Heal) bool { return h.Dst.Agent == a })
+	return q.Where(func(h *Heal) bool { return w.is(h.Dst.Agent) })
 }
 
 // OfSkill keeps the heals of the skill id.

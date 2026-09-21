@@ -68,7 +68,7 @@ func ExampleTimeline_lookups() {
 		panic(err)
 	}
 	p := tl.PlayerByAccount(":Alpha.1234")
-	fmt.Println(p.Name, "subgroup", p.Subgroup, "hits:", p.Hits().Count())
+	fmt.Println(p.Main().Name, "subgroup", p.SubgroupAt(0), "hits:", p.Hits().Count())
 	fmt.Println(tl.Boss().Name, tl.TargetBySpeciesID(15375) == tl.Boss())
 	fmt.Println(tl.PlayerByName("Nobody") == nil, tl.Players().InSubgroup(2).Count())
 	// Output:
@@ -149,13 +149,13 @@ func ExampleAgent_PhasesByHealth() {
 	// [1.5s, 2s] 0 damage, 0 dps
 }
 
-func ExamplePlayer_Spec() {
+func ExamplePlayer_SpecAt() {
 	tl, err := timeline.Build(exampleLog())
 	if err != nil {
 		panic(err)
 	}
 	p := tl.Players().First()
-	fmt.Println(p.Profession, p.EliteSpec, p.Spec())
+	fmt.Println(p.ProfessionAt(0), p.EliteSpecAt(0), p.SpecAt(0))
 	// Output:
 	// Guardian None Guardian
 }

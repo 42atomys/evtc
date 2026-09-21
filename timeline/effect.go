@@ -73,11 +73,11 @@ func (q Effects) At(t time.Duration) Effects { return q.Between(At(t)) }
 
 // By keeps the effects played around e or placed by it.
 func (q Effects) By(e Entity) Effects {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.none() {
 		return q.Where(never[Effect])
 	}
-	return q.Where(func(f *Effect) bool { return f.Agent == a })
+	return q.Where(func(f *Effect) bool { return w.is(f.Agent) })
 }
 
 // OfID keeps the effects with the given content id.

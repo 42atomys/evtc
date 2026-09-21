@@ -64,7 +64,7 @@ func TestNumbersBetween(t *testing.T) {
 	if boss.Health.TimeBelow(50, NewInterval(6*time.Second, 7*time.Second)) != 0 {
 		t.Error("TimeBelow outside the lifetime is not 0")
 	}
-	if tl.players[1].Health.TimeBelow(50, tl.Interval()) != 0 {
+	if tl.characters[1].Health.TimeBelow(50, tl.Interval()) != 0 {
 		t.Error("TimeBelow without samples is not 0")
 	}
 }
@@ -267,7 +267,7 @@ func TestMovement(t *testing.T) {
 	b.facing(1000, addrP1, 0, 1)
 	tl := mustBuild(t, b.build(10000))
 
-	p1 := tl.players[0]
+	p1 := tl.characters[0]
 	// The point of view event of the fixture opens the lifetime at 0; the
 	// teleport counts as a position sample.
 	if p1.Position.Len() != 5 || p1.Lifetime != NewInterval(0, 5*time.Second) {
@@ -351,16 +351,16 @@ func TestHealth(t *testing.T) {
 	if v, _ := boss.Health.Min(); v != 30 {
 		t.Errorf("Min = %v", v)
 	}
-	if v, ok := tl.players[0].Barrier.At(3 * time.Second); !ok || v != 25.5 {
+	if v, ok := tl.characters[0].Barrier.At(3 * time.Second); !ok || v != 25.5 {
 		t.Errorf("Barrier = %v, %v", v, ok)
 	}
-	if v, ok := tl.players[0].Barrier.At(2500 * msec); !ok || v != 25.5 {
+	if v, ok := tl.characters[0].Barrier.At(2500 * msec); !ok || v != 25.5 {
 		t.Errorf("Barrier at its only sample = %v, %v", v, ok)
 	}
-	if v, ok := tl.players[0].Barrier.At(time.Second); !ok || v != 25.5 {
+	if v, ok := tl.characters[0].Barrier.At(time.Second); !ok || v != 25.5 {
 		t.Errorf("Barrier held before its first sample = %v, %v", v, ok)
 	}
-	if _, ok := tl.players[0].Barrier.At(6 * time.Second); ok {
+	if _, ok := tl.characters[0].Barrier.At(6 * time.Second); ok {
 		t.Error("Barrier after the lifetime succeeded")
 	}
 }
