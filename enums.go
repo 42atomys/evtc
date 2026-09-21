@@ -113,9 +113,14 @@ type Activation uint8
 const (
 	// ActivationNone when not an animation event.
 	ActivationNone Activation = iota
-	// ActivationStartDefunc is retired.
+	// ActivationStartDefunc marks a cast start.
+	//
+	// Deprecated: arcdps 20260501 writes a cast start as
+	// StateAnimationStart. Older logs mark it this way.
 	ActivationStartDefunc
-	// ActivationQuicknessDefunc is retired.
+	// ActivationQuicknessDefunc marked a cast start under quickness.
+	//
+	// Deprecated: unused since arcdps 20191107.
 	ActivationQuicknessDefunc
 	// ActivationMinimum when the animation stopped after reaching the
 	// minimum of the first trigger point or tooltip time.
@@ -178,6 +183,47 @@ var buffRemoveNames = []string{
 // String returns the arcdps name of the removal, without its CBTB_ prefix.
 func (b BuffRemove) String() string { return enumString(buffRemoveNames, "BuffRemove", int(b)) }
 
+// BuffCycle is how the damage of a buff tick came about, carried by
+// Event.IsOffcycle on the buff ticks of a log older than arcdps 20260501.
+// It mirrors the cbtbuffcycle enum of arcdps.
+//
+// Deprecated: arcdps 20260501 merged the enum into Result, from
+// ResultBuffDamageCycle on. Only older logs hold it.
+type BuffCycle uint8
+
+const (
+	// BuffCycleCycle when the damage happened on the tick timer.
+	BuffCycleCycle BuffCycle = iota
+	// BuffCycleNotCycle when the damage happened outside the tick timer.
+	BuffCycleNotCycle
+	// BuffCycleNotCycleNoResist held the values after it until May 2021.
+	BuffCycleNotCycleNoResist
+	// BuffCycleNotCycleDmgToTargetOnHit when the damage happened to the
+	// target on hitting the target.
+	BuffCycleNotCycleDmgToTargetOnHit
+	// BuffCycleNotCycleDmgToSourceOnHit when the damage happened to the
+	// source on hitting the target.
+	BuffCycleNotCycleDmgToSourceOnHit
+	// BuffCycleNotCycleDmgToTargetOnStackRemove when the damage happened
+	// to the target on buff removal.
+	BuffCycleNotCycleDmgToTargetOnStackRemove
+	// BuffCycleUnknown is any value newer than this list.
+	BuffCycleUnknown
+)
+
+var buffCycleNames = []string{
+	BuffCycleCycle:                            "Cycle",
+	BuffCycleNotCycle:                         "NotCycle",
+	BuffCycleNotCycleNoResist:                 "NotCycleNoResist",
+	BuffCycleNotCycleDmgToTargetOnHit:         "NotCycleDmgToTargetOnHit",
+	BuffCycleNotCycleDmgToSourceOnHit:         "NotCycleDmgToSourceOnHit",
+	BuffCycleNotCycleDmgToTargetOnStackRemove: "NotCycleDmgToTargetOnStackRemove",
+	BuffCycleUnknown:                          "Unknown",
+}
+
+// String returns the arcdps name of the cycle, without its CBTC_ prefix.
+func (c BuffCycle) String() string { return enumString(buffCycleNames, "BuffCycle", int(c)) }
+
 // Language is the text language id carried by Event.SrcAgent on
 // StateLanguage events. It mirrors the gwlanguage enum of arcdps.
 type Language uint8
@@ -202,7 +248,9 @@ var languageNames = []string{
 func (l Language) String() string { return enumString(languageNames, "Language", int(l)) }
 
 // ContentLocal is the content type carried by Event.OverstackValue on
-// StateIDToGUID events. It mirrors the n_contentlocal enum of arcdps.
+// StateIDToGUID events, with the values arcdps writes. The n_contentlocal
+// enum of its README leaves the team out and gives emotes 4 and
+// transformations 5; in the logs a transformation is 6.
 type ContentLocal uint32
 
 const (
@@ -215,7 +263,15 @@ const (
 	ContentLocalSkill
 	// ContentLocalSpeciesNotGadget is a non-gadget species.
 	ContentLocalSpeciesNotGadget
-	// ContentLocalEmote is an emote.
+	// ContentLocalTeam is a team, in the logs of arcdps 20260226 to
+	// 20260604.
+	//
+	// Deprecated: arcdps 20260701 stopped writing it.
+	ContentLocalTeam
+	// ContentLocalEmote is an emote, in the logs of arcdps 20260414 to
+	// 20260604.
+	//
+	// Deprecated: arcdps 20260701 stopped writing it.
 	ContentLocalEmote
 	// ContentLocalTransformation is a transformation.
 	ContentLocalTransformation
@@ -226,12 +282,13 @@ var contentLocalNames = []string{
 	ContentLocalMarker:           "Marker",
 	ContentLocalSkill:            "Skill",
 	ContentLocalSpeciesNotGadget: "SpeciesNotGadget",
+	ContentLocalTeam:             "Team",
 	ContentLocalEmote:            "Emote",
 	ContentLocalTransformation:   "Transformation",
 }
 
-// String returns the arcdps name of the content type, without its
-// CONTENTLOCAL_ prefix.
+// String returns the name of the content type: the arcdps one without
+// its CONTENTLOCAL_ prefix, where the README has one.
 func (c ContentLocal) String() string { return enumString(contentLocalNames, "ContentLocal", int(c)) }
 
 // Custom skill ids emitted by arcdps itself rather than the game. They
@@ -245,6 +302,8 @@ const (
 	SkillEnemyCast2
 	SkillSelfCast3
 	SkillEnemyCast3
+	// Deprecated: arcdps lists SkillBreakbarDefunc as defunct, and no log
+	// from arcdps 20230114 on names it.
 	SkillBreakbarDefunc
 	SkillWeaponDraw
 	SkillWeaponStow
@@ -260,6 +319,10 @@ const (
 	SkillGenericKnockbackPull
 	SkillGenericFloatLand
 	SkillGenericLaunch
+	// SkillGenericWaterFloatSinkDefunc is a float or a sink in water.
+	//
+	// Deprecated: arcdps 20260507 splits it into SkillGenericFloatWater
+	// and SkillGenericSink.
 	SkillGenericWaterFloatSinkDefunc
 	SkillGenericCCBuff
 	SkillGenericStagger

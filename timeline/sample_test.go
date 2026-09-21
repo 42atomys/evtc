@@ -33,6 +33,16 @@ func loadSample(tb testing.TB) *Timeline {
 	return tl
 }
 
+// TestSampleCapabilities pins what arcdps 20260816 could not write yet:
+// Airborne and Ping are empty on this log for lack of data.
+func TestSampleCapabilities(t *testing.T) {
+	tl := loadSample(t)
+	want := []evtc.Capability{evtc.CapabilityJumps, evtc.CapabilityPing, evtc.CapabilityGadgetModels}
+	if !slices.Equal(tl.Missing(), want) || len(tl.Warnings()) != 0 {
+		t.Errorf("missing = %v, warnings = %v", tl.Missing(), tl.Warnings())
+	}
+}
+
 func TestSampleOverview(t *testing.T) {
 	tl := loadSample(t)
 

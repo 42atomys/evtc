@@ -183,7 +183,7 @@ func ExampleBuild() {
 	log := cookbookLog() // evtc.ParseFile("fight.zevtc") on a real file
 	tl, err := timeline.Build(log)
 	if err != nil {
-		panic(err) // timeline.ErrLegacyLog for logs older than arcdps 20260501
+		panic(err) // timeline.ErrLegacyLog for logs older than arcdps 20240613
 	}
 	fmt.Println(tl.Boss().Name, "fought by", tl.Players().Count(), "players for", tl.Duration)
 	fmt.Println("arcdps build", tl.Build, "events", tl.Events().Count(), "hits", tl.Hits().Count())

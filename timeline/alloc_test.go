@@ -3,6 +3,8 @@ package timeline
 import (
 	"testing"
 	"time"
+
+	"github.com/42atomys/evtc"
 )
 
 // TestQueryAllocations pins the allocation profile of the hot query paths:
@@ -60,6 +62,7 @@ func TestQueryAllocations(t *testing.T) {
 		{"Ping.At", 0, func() { tl.Ping.At(at) }},
 		{"WeaponSetAt", 0, func() { p.WeaponSetAt(at) }},
 		{"PingAt", 0, func() { tl.PingAt(at) }},
+		{"Has", 0, func() { tl.Has(evtc.CapabilityStealth) }},
 		{"Hits.Foes.Count", 0, func() { sink = p.Hits().Foes().Count() }},
 		{"Stacks.RemovedBy.Count", 1, func() { sink = tl.Stacks().RemovedBy(p).Count() }},
 		{"Stacks.EffectiveAt", 3, func() { sink = p.Stacks().EffectiveAt(at) }},

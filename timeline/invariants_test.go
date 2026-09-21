@@ -145,10 +145,20 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 			}
 		}
 		checkSeries(tb, a.String()+" position", a.Position)
+		for _, smp := range a.Position.Samples() {
+			if smp.Event.IsStateChange == evtc.StateTeleport && (!smp.Break || !hasTarget(smp.Event)) {
+				fail("teleport of %v at %v is a position without a target or a break", a, smp.Time)
+			}
+		}
 		checkSeries(tb, a.String()+" velocity", a.Velocity)
 		checkSeries(tb, a.String()+" facing", a.Facing)
 		checkSeries(tb, a.String()+" health", a.Health.Series)
 		checkSeries(tb, a.String()+" barrier", a.Barrier.Series)
+		for _, smp := range append(a.Health.Samples(), a.Barrier.Samples()...) {
+			if smp.Value < 0 || smp.Value > 100 {
+				fail("%v has a health or barrier sample of %v%%", a, smp.Value)
+			}
+		}
 		checkSeries(tb, a.String()+" max health", a.MaxHealth.Series)
 		checkSeries(tb, a.String()+" defiance percent", a.DefiancePercent.Series)
 		checkSpans(tb, a.String()+" states", a.Life, true)
@@ -167,8 +177,11 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 				fail("gadget animation %d of %v is inconsistent: %+v", i, a, ga)
 			}
 		}
-		if first, ok := a.WeaponSet.First(); ok && (first.Start != a.Lifetime.Start || first.Event != nil) {
+		// A swap names the set left from arcdps 20240627 only.
+		if first, ok := a.WeaponSet.First(); ok && tl.Has(evtc.CapabilityPreviousWeaponSet) && (first.Start != a.Lifetime.Start || first.Event != nil) {
 			fail("weapon sets of %v do not start with the set before the first swap: %+v", a, first)
+		} else if ok && !tl.Has(evtc.CapabilityPreviousWeaponSet) && first.Event == nil {
+			fail("weapon sets of %v start with a set no swap named: %+v", a, first)
 		}
 		for i, m := range a.Markers {
 			if m.Agent != a || m.Event == nil || m.ID == 0 || m.Interval.Start != tl.rel(m.Event.Time) || m.Interval.Start > m.Interval.End || (i > 0 && m.Interval.Start < a.Markers[i-1].Interval.Start) {
@@ -202,7 +215,7 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 		}
 		effectsByAgent += len(a.effects)
 		for i, f := range a.effects {
-			if f.Agent != a || f.Create == nil || f.Interval.Start > f.Interval.End || f.Ground != (f.Create.IsStateChange == evtc.StateEffectGroundCreate) || f.Scale == 0 {
+			if f.Agent != a || f.Create == nil || f.Interval.Start > f.Interval.End || f.Ground != onGround(f.Create) || f.Scale == 0 {
 				fail("effect %d of %v is inconsistent: %+v", i, a, f)
 			}
 			if i > 0 && f.Interval.Start < a.effects[i-1].Interval.Start {
@@ -324,6 +337,12 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 			fail("global missiles are not sorted")
 		}
 	}
+	exact("capabilities", len(tl.capabilities), cap(tl.capabilities))
+	exact("missing capabilities", len(tl.missing), cap(tl.missing))
+	exact("warnings", len(tl.warnings), cap(tl.warnings))
+	if !slices.Equal(tl.capabilities, tl.Log.Capabilities()) || !slices.Equal(tl.missing, tl.Log.Missing()) {
+		fail("capabilities %v and %v differ from the log", tl.capabilities, tl.missing)
+	}
 	exact("ping samples", tl.Ping.Len(), cap(tl.Ping.samples))
 	exact("ground markers", len(tl.GroundMarkers), cap(tl.GroundMarkers))
 	checkSeries(tb, "ping", tl.Ping.Series)
@@ -417,7 +436,7 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 	for i, s := range tl.stacks {
 		exact("changes of stack "+strconv.Itoa(i), len(s.Changes), cap(s.Changes))
 		for j, c := range s.Changes {
-			if c.IsStateChange != evtc.StateBuffChange || trackableID(c) != s.ID || !s.Interval.Contains(tl.rel(c.Time)) || (j > 0 && c.Time < s.Changes[j-1].Time) {
+			if kindOf(tl, c) != evtc.StateBuffChange || trackableID(c) != s.ID || !s.Interval.Contains(tl.rel(c.Time)) || (j > 0 && c.Time < s.Changes[j-1].Time) {
 				fail("change %d of stack %d is inconsistent: %+v", j, i, c)
 			}
 		}
@@ -525,7 +544,7 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 		if s.Open() && s.Interval.End != tl.Duration {
 			fail("open stack %d ends at %v, not at the log end %v", i, s.Interval.End, tl.Duration)
 		}
-		if s.Remove != nil && s.Remove.IsStateChange == evtc.StateBuffRemoveSingle && trackableID(s.Remove) != s.ID {
+		if s.Remove != nil && kindOf(tl, s.Remove) == evtc.StateBuffRemoveSingle && trackableID(s.Remove) != s.ID {
 			fail("stack %d was closed by the removal of another id", i)
 		}
 		if s.Superseded && (s.Remove != nil || s.Open()) {
@@ -893,4 +912,22 @@ func registeredSignatures(tl *Timeline) map[uint32]bool {
 		sigs[x.Signature] = true
 	}
 	return sigs
+}
+
+// kindOf returns the kind a raw event has in the typed format, whatever
+// the format of its log.
+func kindOf(tl *Timeline, e *evtc.Event) evtc.StateChange {
+	if tl.Has(evtc.CapabilityTypedEvents) {
+		return e.IsStateChange
+	}
+	return legacyKind(e)
+}
+
+// onGround reports whether the creation event of an effect places it on
+// the ground.
+func onGround(e *evtc.Event) bool {
+	if e.IsStateChange == evtc.StateEffect2Defunc {
+		return !legacyEffectOnAgent(e)
+	}
+	return e.IsStateChange == evtc.StateEffectGroundCreate
 }

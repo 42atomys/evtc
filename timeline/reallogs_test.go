@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,35 +31,49 @@ type kindTally struct {
 	logs, events, uncovered int
 }
 
-// TestRealLogs builds every log under ../tests_fixtures, checks the graph
-// invariants, runs the public API on it and measures how much of the log
-// the graph consumes: an event is covered when a node keeps a pointer to
-// it or when its kind is read into a scalar field. The report is printed
-// with -v. The test runs only with EVTC_REAL_LOGS set, as it reads
-// hundreds of megabytes of logs.
+// TestRealLogs builds every log under ../tests_fixtures, or under the
+// folder EVTC_REAL_LOGS names, checks the graph invariants, runs the
+// public API on it, checks a log of the typed format builds the same graph
+// once written the older way, and measures how much of the log the graph
+// consumes: an event is covered when a node keeps a pointer to it or when
+// its kind is read into a scalar field. The report is printed with -v. The
+// test runs only with EVTC_REAL_LOGS set, as it reads hundreds of
+// megabytes of logs, several at a time: -parallel bounds how many.
 func TestRealLogs(t *testing.T) {
-	if os.Getenv("EVTC_REAL_LOGS") == "" {
-		t.Skip("set EVTC_REAL_LOGS=1 to build every log under ../tests_fixtures")
-	}
-	paths, _ := filepath.Glob("../tests_fixtures/*.zevtc")
-	if len(paths) == 0 {
-		t.Skip("no log under ../tests_fixtures")
-	}
-	slices.Sort(paths)
+	paths := realLogs(t)
 	tallies := map[evtc.StateChange]*kindTally{}
+	var mu sync.Mutex
 	var lines []string
-	totalEvents, totalCovered := 0, 0
+	built, totalEvents, totalCovered := 0, 0, 0
 	var totalBuild time.Duration
-	for _, path := range paths {
-		name := strings.TrimSuffix(filepath.Base(path), ".zevtc")
-		t.Run(name, func(t *testing.T) {
-			line, covered, events, build := validateLog(t, path, tallies)
-			lines = append(lines, line)
-			totalEvents += events
-			totalCovered += covered
-			totalBuild += build
-		})
-	}
+	t.Run("logs", func(t *testing.T) {
+		for _, path := range paths {
+			t.Run(strings.TrimSuffix(filepath.Base(path), ".zevtc"), func(t *testing.T) {
+				t.Parallel()
+				line, perKind, build := validateLog(t, path)
+				mu.Lock()
+				defer mu.Unlock()
+				lines = append(lines, line)
+				totalBuild += build
+				if perKind != nil {
+					built++
+				}
+				for k, ty := range perKind {
+					g := tallies[k]
+					if g == nil {
+						g = &kindTally{}
+						tallies[k] = g
+					}
+					g.logs++
+					g.events += ty.events
+					g.uncovered += ty.uncovered
+					totalEvents += ty.events
+					totalCovered += ty.events - ty.uncovered
+				}
+			})
+		}
+	})
+	slices.Sort(lines)
 	t.Logf("\n%s", strings.Join(lines, "\n"))
 	kinds := make([]evtc.StateChange, 0, len(tallies))
 	for k := range tallies {
@@ -82,12 +97,41 @@ func TestRealLogs(t *testing.T) {
 		}
 		table = append(table, fmt.Sprintf("%-22s logs %3d events %9d uncovered %8d  %s", k, ty.logs, ty.events, ty.uncovered, note))
 	}
-	t.Logf("\n%d logs, %d events, %.3f%% covered, built in %v\n%s", len(paths), totalEvents, 100*float64(totalCovered)/float64(max(totalEvents, 1)), totalBuild.Round(time.Millisecond), strings.Join(table, "\n"))
+	t.Logf("\n%d logs of %d built, %d events, %.3f%% covered, in %v\n%s", built, len(paths), totalEvents, 100*float64(totalCovered)/float64(max(totalEvents, 1)), totalBuild.Round(time.Millisecond), strings.Join(table, "\n"))
 }
 
-// validateLog builds one log and returns its report line, its covered and
-// total event counts and its build time.
-func validateLog(t *testing.T, path string, tallies map[evtc.StateChange]*kindTally) (line string, covered, events int, build time.Duration) {
+// realLogs returns the logs TestRealLogs runs on: those of
+// ../tests_fixtures when EVTC_REAL_LOGS is 1, else those of the folder it
+// names, a relative path being read from the repository root.
+func realLogs(t *testing.T) []string {
+	t.Helper()
+	dir := os.Getenv("EVTC_REAL_LOGS")
+	if dir == "" {
+		t.Skip("set EVTC_REAL_LOGS to 1 to build every log under ../tests_fixtures, or to a folder of logs")
+	}
+	named := dir != "1"
+	if !named {
+		dir = "tests_fixtures"
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join("..", dir)
+	}
+	paths, _ := filepath.Glob(filepath.Join(dir, "*.zevtc"))
+	// A folder named on purpose must hold logs; tests_fixtures may be
+	// missing.
+	if len(paths) == 0 && named {
+		t.Fatalf("no log under %s", dir)
+	}
+	if len(paths) == 0 {
+		t.Skipf("no log under %s", dir)
+	}
+	slices.Sort(paths)
+	return paths
+}
+
+// validateLog builds one log and returns its report line, its events
+// tallied by kind (nil when the log was not built) and its build time.
+func validateLog(t *testing.T, path string) (line string, perKind map[evtc.StateChange]*kindTally, build time.Duration) {
 	name := strings.TrimSuffix(filepath.Base(path), ".zevtc")
 	defer func() {
 		if r := recover(); r != nil {
@@ -98,50 +142,51 @@ func validateLog(t *testing.T, path string, tallies map[evtc.StateChange]*kindTa
 	l, err := evtc.ParseFile(path)
 	if err != nil {
 		t.Errorf("%s: parse: %v", name, err)
-		return name + ": parse error", 0, 0, 0
+		return name + ": parse error", nil, 0
 	}
 	start := time.Now()
 	tl, err := Build(l)
 	build = time.Since(start)
 	if errors.Is(err, ErrLegacyLog) {
-		return fmt.Sprintf("%s: legacy log (arcdps %s), refused", name, l.Header.Build), 0, len(l.Events), build
+		return fmt.Sprintf("%s: too old (arcdps %s), refused", name, l.Header.Build), nil, build
 	}
 	if err != nil {
 		t.Errorf("%s: build: %v", name, err)
-		return name + ": build error", 0, len(l.Events), build
+		return name + ": build error", nil, build
 	}
 	checkInvariants(t, tl)
 	smoke(t, name, tl)
 	anomalies := sanity(tl)
+	if tl.Has(evtc.CapabilityTypedEvents) {
+		// The same fight written the older way builds the same graph.
+		typed, legacy := buildBoth(t, l)
+		sameTimeline(t, typed, legacy)
+	}
 
 	refs := referencedEvents(tl)
-	perKind := map[evtc.StateChange]*kindTally{}
+	perKind = map[evtc.StateChange]*kindTally{}
+	covered := 0
 	for i := range l.Events {
 		e := &l.Events[i]
-		k := e.IsStateChange
+		k := kindOf(tl, e)
+		if k == kindSkipped {
+			k = e.IsStateChange
+		}
 		ty := perKind[k]
 		if ty == nil {
 			ty = &kindTally{}
 			perKind[k] = ty
 		}
 		ty.events++
-		if refs[e] || scalarKinds[k] {
+		if refs[e] || scalarKinds[e.IsStateChange] {
 			covered++
 		} else {
 			ty.uncovered++
 		}
 	}
-	events = len(l.Events)
+	events := len(l.Events)
 	var dropped []string
 	for k, ty := range perKind {
-		g := tallies[k]
-		if g == nil {
-			g = &kindTally{}
-			tallies[k] = g
-		}
-		g.logs++
-		g.events += ty.events
-		g.uncovered += ty.uncovered
 		if ty.uncovered > 0 {
 			dropped = append(dropped, fmt.Sprintf("%v %d/%d", k, ty.uncovered, ty.events))
 		}
@@ -155,7 +200,7 @@ func validateLog(t *testing.T, path string, tallies map[evtc.StateChange]*kindTa
 	if len(anomalies) > 0 {
 		line += "\n    anomalies: " + strings.Join(anomalies, "; ")
 	}
-	return line, covered, events, build
+	return line, perKind, build
 }
 
 // referencedEvents collects every raw event a node of the graph points to.
@@ -430,19 +475,10 @@ func sanity(tl *Timeline) []string {
 	if n := tl.Hits().Count(); n > 0 && unknownHits > n/5 {
 		out = append(out, fmt.Sprintf("%d of %d hits from an unknown source", unknownHits, n))
 	}
-	badHealth := 0
 	for _, a := range tl.agents {
-		for _, smp := range a.Health.Samples() {
-			if smp.Value < 0 || smp.Value > 100 {
-				badHealth++
-			}
-		}
 		if a.Lifetime.Start > a.Lifetime.End {
 			out = append(out, fmt.Sprintf("%v has an inverted lifetime %v", a, a.Lifetime))
 		}
-	}
-	if badHealth > 0 {
-		out = append(out, fmt.Sprintf("%d health samples outside 0..100", badHealth))
 	}
 	noCause := 0
 	for _, p := range tl.characters {

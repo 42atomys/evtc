@@ -235,6 +235,7 @@ machine; the integration tests run when
 `tests_fixtures/sabetha-05-fd9b6f3a.zevtc` is present at the repository
 root and skip otherwise, and
 `EVTC_REAL_LOGS=1 go test ./extensions/healingstats -run TestRealLogs -v`
-decodes every log under `tests_fixtures/` and reports, per log, the
-heals, the records merged and the heals between recording players that
-only one client wrote.
+decodes every log under `tests_fixtures/`, or under the folder the
+variable names instead of 1 (relative to the repository root, or
+absolute), and reports, per log, the heals, the records merged and the
+heals between recording players that only one client wrote.

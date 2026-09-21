@@ -143,20 +143,36 @@ const (
 	// StateBarrierPctUpdate when agent barrier percentage changed.
 	// src_agent: agent, dst_agent: percent * 10000.
 	StateBarrierPctUpdate
-	// StateStatResetDefunc is retired, not used since 260402+.
+	// StateStatResetDefunc when arcdps reset its stats.
+	// src_agent: species id of the agent that triggered the reset, the
+	// boss for one.
+	//
+	// Deprecated: arcdps 20260414 stopped writing it.
 	StateStatResetDefunc
 	// StateExtension is for extension use, not managed by arcdps.
 	StateExtension
-	// StateAPIDelayedDefunc is retired, not used since 260501+.
+	// StateAPIDelayedDefunc marked, in the realtime API, an event held
+	// back until the end of the squad combat.
+	//
+	// Deprecated: retired by arcdps 20260501, and never written to a log.
 	StateAPIDelayedDefunc
 	// StateInstanceStart is the map instance start.
 	// src_agent: ms ago the instance was started, value: uint32 server socket.
 	StateInstanceStart
-	// StateRateHealth is retired, not used since 260627+.
+	// StateRateHealth is the health of the server tick rate, written
+	// while the rate is 20 or less.
+	// src_agent: 25 minus the tick rate.
+	//
+	// Deprecated: arcdps 20260701 replaced it with StateTick.
 	StateRateHealth
-	// StateLast90BeforeDownDefunc is retired, not used since 240529+.
+	// StateLast90BeforeDownDefunc when an enemy went down.
+	// src_agent: agent, dst_agent: ms since it was last at 90% health.
+	//
+	// Deprecated: arcdps 20240612 stopped writing it.
 	StateLast90BeforeDownDefunc
-	// StateEffect1Defunc is retired, not used since 230716+.
+	// StateEffect1Defunc is the first encoding of effects.
+	//
+	// Deprecated: arcdps 20230718 replaced it with StateEffect2Defunc.
 	StateEffect1Defunc
 	// StateIDToGUID is a content id to guid association for volatile types.
 	// src_agent: uint8[16] guid of content,
@@ -174,7 +190,16 @@ const (
 	// StateFractalScale is the fractal scale.
 	// src_agent: scale.
 	StateFractalScale
-	// StateEffect2Defunc is retired, not used since 250526+.
+	// StateEffect2Defunc plays an effect, or stops one when it names
+	// neither an agent nor a place.
+	// src_agent: owner, dst_agent: agent the effect plays at, if any,
+	// value: float[3] x/y/z otherwise, skillid: effect id,
+	// iff: uint32 duration, is_buffremove: uint32 trackable id,
+	// is_flanking: on a non-static platform,
+	// is_shields: int16[3] orientation multiplied by 1000.
+	//
+	// Deprecated: arcdps 20250603 replaced it with StateEffectGroundCreate
+	// and the three kinds after it.
 	StateEffect2Defunc
 	// StateRuleset is the ruleset for self.
 	// src_agent: bit0 pve, bit1 wvw, bit2 pvp.
@@ -315,7 +340,8 @@ const (
 	// real update, value: ping.
 	StateTick
 	// StateTeleport when agent position changed by teleport.
-	// src_agent: agent, dst_agent: float[3] x/y/z of target,
+	// src_agent: agent, dst_agent: float[3] x/y/z of target (all zero in
+	// about half of the teleports of arcdps 20260915),
 	// overstack_value, is_offcycle: undocumented server data.
 	StateTeleport
 	// StateJump when agent jumps.

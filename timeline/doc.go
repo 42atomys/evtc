@@ -24,8 +24,9 @@
 // in Extension.Decoded. The extensions/healingstats package does so for
 // the healing stats addon.
 //
-// Only logs written by arcdps 20260501 or later are supported: earlier
-// logs encode casts and buffs differently and Build returns ErrLegacyLog
-// for them. The package requires Go 1.27 for the generic methods of its
-// query types.
+// Logs written by arcdps 20240613 or later are supported, and Build
+// returns ErrLegacyLog for older ones. Before arcdps 20260501 a log writes
+// casts and buff events another way; Build gives both formats the same
+// graph, and evtc.CapabilityTypedEvents tells them apart. The package
+// requires Go 1.27 for the generic methods of its query types.
 package timeline

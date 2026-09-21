@@ -81,6 +81,10 @@ func TestSessionAndSquad(t *testing.T) {
 	if !tl.GUID(ContentSkill, 7).IsZero() {
 		t.Error("a GUID of another kind matched")
 	}
+	// The values of the logs, not of the arcdps README.
+	if ContentTeam != 4 || ContentEmote != 5 || ContentTransformation != 6 || ContentTransformation.String() != "Transformation" {
+		t.Error("content kinds moved")
+	}
 	if tl.PingAt(2*time.Second) != 45 || tl.PingAt(0) != 0 || p1.TeamAt(2*time.Second) != 10 || p2.TeamAt(2*time.Second) != 0 {
 		t.Error("PingAt or TeamAt is wrong")
 	}

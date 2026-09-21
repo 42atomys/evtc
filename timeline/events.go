@@ -20,7 +20,8 @@ func (q Events) Where(p func(*evtc.Event) bool) Events {
 	return q
 }
 
-// Of keeps the events of the given state change.
+// Of keeps the events of the given state change, as the log holds them:
+// before arcdps 20260501 a cast or a buff event is a StateCombat event.
 func (q Events) Of(kind evtc.StateChange) Events {
 	return q.Where(func(e *evtc.Event) bool { return e.IsStateChange == kind })
 }
@@ -105,7 +106,8 @@ func srcIsAgent(k evtc.StateChange) bool {
 	case evtc.StateSquadCombatStart, evtc.StateSquadCombatEnd, evtc.StateLanguage, evtc.StateGWBuild,
 		evtc.StateShardID, evtc.StateMapID, evtc.StateReplInfo, evtc.StateBuffInfo, evtc.StateBuffFormula,
 		evtc.StateSkillInfo, evtc.StateSkillTiming, evtc.StateIntegrity, evtc.StateExtension,
-		evtc.StateAPIDelayedDefunc, evtc.StateInstanceStart, evtc.StateRateHealth, evtc.StateIDToGUID,
+		evtc.StateStatResetDefunc, evtc.StateAPIDelayedDefunc, evtc.StateInstanceStart, evtc.StateRateHealth,
+		evtc.StateIDToGUID,
 		evtc.StateLogNPCUpdate, evtc.StateIdleEvent, evtc.StateFractalScale, evtc.StateRuleset,
 		evtc.StateSquadMarkerGround, evtc.StateArcBuild, evtc.StateIIDChange, evtc.StateMapChange,
 		evtc.StateEarlyExit, evtc.StateWvWTeams, evtc.StateWvWObjectiveStatus, evtc.StateTick,
@@ -123,7 +125,7 @@ func dstIsAgent(k evtc.StateChange) bool {
 	case evtc.StateCombat, evtc.StateExtensionCombat, evtc.StateBuffInitial, evtc.StateBuffApply,
 		evtc.StateBuffChange, evtc.StateBuffRemoveSingle, evtc.StateBuffRemoveAll,
 		evtc.StateAnimationStart, evtc.StateAttackTarget, evtc.StateLogNPCUpdate,
-		evtc.StateMissileLaunch, evtc.StateMissileEffect:
+		evtc.StateMissileLaunch, evtc.StateMissileEffect, evtc.StateEffect2Defunc:
 		return true
 	}
 	return false
@@ -138,6 +140,10 @@ func vec3(e *evtc.Event) Vec3 {
 	}
 }
 
+// hasTarget reports whether a teleport says where the agent went. arcdps
+// 20260915 writes about half of its teleports with a target of zero.
+func hasTarget(e *evtc.Event) bool { return e.DstAgent != 0 || e.Value != 0 }
+
 // vec2 decodes the float[2] packed in DstAgent.
 func vec2(e *evtc.Event) Vec2 {
 	return Vec2{
@@ -148,6 +154,12 @@ func vec2(e *evtc.Event) Vec2 {
 
 // percent decodes a DstAgent holding a percentage times 100.
 func percent(e *evtc.Event) float64 { return float64(e.DstAgent) / 100 }
+
+// isPercent reports whether a health or barrier update holds a percentage.
+// Until 20260701 arcdps also writes them for agents without health, with
+// what a division by zero left in place of the value: nearly every barrier
+// update is one.
+func isPercent(e *evtc.Event) bool { return e.DstAgent <= 100*100 }
 
 // defiancePercent decodes the float fraction carried by Value into a
 // percentage.

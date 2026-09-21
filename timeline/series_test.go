@@ -256,6 +256,40 @@ func TestSeriesAndSpansIteration(t *testing.T) {
 	}
 }
 
+// TestTeleportWithoutTarget checks a teleport whose target is zero, as
+// arcdps 20260915 writes them: it is no position sample, and the agent
+// jumps to its next position instead of gliding there.
+func TestTeleportWithoutTarget(t *testing.T) {
+	b := fixture()
+	b.move(1000, addrP1, evtc.StatePosition, 100, 100, 0)
+	b.move(1000, addrP1, evtc.StateTeleport, 0, 0, 0)
+	b.move(1200, addrP1, evtc.StatePosition, 500, 100, 0)
+	b.move(1400, addrP1, evtc.StatePosition, 600, 100, 0)
+	// A teleport with a target clears the pending break: it is the break.
+	b.move(3000, addrP2, evtc.StateTeleport, 0, 0, 0)
+	b.move(3100, addrP2, evtc.StateTeleport, 50, 50, 0)
+	b.move(3300, addrP2, evtc.StatePosition, 60, 50, 0)
+	tl := mustBuild(t, b.build(10000))
+
+	p1, p2 := tl.characters[0], tl.characters[1]
+	samples := p1.Position.Samples()
+	if len(samples) != 3 || samples[0].Break || !samples[1].Break || samples[2].Break {
+		t.Fatalf("samples = %+v", samples)
+	}
+	for _, tt := range []struct {
+		at   time.Duration
+		want Vec3
+	}{{1100 * msec, Vec3{100, 100, 0}}, {1200 * msec, Vec3{500, 100, 0}}, {1300 * msec, Vec3{550, 100, 0}}} {
+		if got := p1.PositionAt(tt.at); got != tt.want {
+			t.Errorf("PositionAt(%v) = %v, want %v", tt.at, got, tt.want)
+		}
+	}
+	if s := p2.Position.Samples(); len(s) != 2 || !s[0].Break || s[1].Break {
+		t.Errorf("samples after the two teleports = %+v", s)
+	}
+	checkInvariants(t, tl)
+}
+
 func TestMovement(t *testing.T) {
 	b := fixture()
 	b.move(1000, addrP1, evtc.StatePosition, 0, 0, 0)

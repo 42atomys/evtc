@@ -202,6 +202,24 @@ func TestPointHelpers(t *testing.T) {
 	checkInvariants(t, tl)
 }
 
+// TestHealthOfAgentWithoutHealth checks the updates arcdps wrote until
+// 20260701 for agents without health, a division by zero in place of the
+// percentage, give no sample.
+func TestHealthOfAgentWithoutHealth(t *testing.T) {
+	b := fixture()
+	b.health(1000, addrAdd, 80)
+	b.barrier(1000, addrAdd, 5)
+	for _, kind := range []evtc.StateChange{evtc.StateHealthPctUpdate, evtc.StateBarrierPctUpdate} {
+		b.add(evtc.Event{Time: b.at(2000), SrcAgent: addrAdd, DstAgent: 1 << 63, IsStateChange: kind})
+	}
+	tl := mustBuild(t, b.build(10000))
+	add := tl.Agent(addrAdd)
+	if add.Health.Len() != 1 || add.Barrier.Len() != 1 || add.HealthAt(2*time.Second) != 80 {
+		t.Errorf("health %v barrier %v", add.Health.Samples(), add.Barrier.Samples())
+	}
+	checkInvariants(t, tl)
+}
+
 func TestHealthHelpers(t *testing.T) {
 	b := fixture()
 	b.health(1000, addrBoss, 100)

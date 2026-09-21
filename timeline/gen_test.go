@@ -127,7 +127,13 @@ func genLog(o genOptions) *evtc.Log {
 				s.y += float32(r.IntN(61) - 30)
 				b.move(t, p, evtc.StatePosition, s.x, s.y, -2400)
 				if r.IntN(50) == 0 {
-					b.move(t, p, evtc.StateTeleport, s.x+500, s.y, -2400)
+					// One teleport out of two has no target, as in the logs
+					// of arcdps 20260915.
+					if t%600 == 0 {
+						b.move(t, p, evtc.StateTeleport, 0, 0, 0)
+					} else {
+						b.move(t, p, evtc.StateTeleport, s.x+500, s.y, -2400)
+					}
 				}
 			}
 			b.facing(t, boss, float32(r.Float64()*2-1), float32(r.Float64()*2-1))

@@ -190,12 +190,17 @@ type Agent struct {
 	Condition int16
 	// HitboxWidth is the hitbox width of the agent.
 	HitboxWidth uint16
-	// HitboxHeight is the hitbox height of the agent.
+	// HitboxHeight is what arcdps called the hitbox height of the agent
+	// until it retired the field, saying it never was one. It is 0 for
+	// players and NPCs from arcdps 20251118.
+	//
+	// Deprecated: always 0 from arcdps 20260602.
 	HitboxHeight uint16
 
 	// Position is the position over time, interpolated between samples
 	// closer than MoveGap; a teleport is a sample that breaks the
-	// interpolation.
+	// interpolation. A teleport written without a target is no sample: it
+	// breaks the next one.
 	Position Series[Vec3]
 	// Velocity is the velocity over time, interpolated like Position.
 	Velocity Series[Vec3]
@@ -243,8 +248,10 @@ type Agent struct {
 	Team Spans[uint32]
 	// WeaponSet is the weapon set id of the agent over time, as the game
 	// logs it: 4 and 5 are the two land sets, kits, bundles and
-	// transformations use other ids. The first span holds the set in use
-	// before the first swap.
+	// transformations use other ids. When swaps name the set left
+	// (evtc.CapabilityPreviousWeaponSet) the first span holds the set in
+	// use before the first swap; in a log older than arcdps 20240627 the
+	// spans start at the first swap.
 	WeaponSet Spans[uint32]
 	// Stealth is the raw arcdps stealth state of the agent over time. The
 	// arcdps README documents 0 for false, 1 for true and 2 for

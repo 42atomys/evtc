@@ -47,6 +47,9 @@ type agentCounts struct {
 	// during the scan, openMarkers the ids of the markers it wears.
 	openIDs     []uint32
 	openMarkers []uint32
+	// teleported is set during the fill, from a teleport without a target
+	// to the next position or teleport of the agent.
+	teleported bool
 }
 
 type castKey struct {
@@ -65,6 +68,11 @@ type builder struct {
 
 	counts     []agentCounts
 	srcs, dsts []*Agent
+	// kinds holds the kind of each timed event in the typed format, for a
+	// log written before it; nil otherwise. See legacy.go.
+	kinds []evtc.StateChange
+	// previousSets is set when a weapon swap names the set left.
+	previousSets bool
 	// shared holds the addresses that several agent table entries carry.
 	shared map[uint64]*sharedAddr
 	// builds are the subgroup, profession and specialization a player
@@ -132,6 +140,10 @@ type builder struct {
 func (b *builder) run() *Timeline {
 	b.makeAgents()
 	b.collectEvents()
+	if !b.tl.Has(evtc.CapabilityTypedEvents) {
+		b.kinds = legacyKinds(b.tl.events)
+	}
+	b.previousSets = b.tl.Has(evtc.CapabilityPreviousWeaponSet)
 	b.makeSkills()
 	b.scan()
 	b.dropUnclaimed()
@@ -159,6 +171,25 @@ func (b *builder) decodeExtensions() {
 
 // cnt returns the scan counts of an agent.
 func (b *builder) cnt(a *Agent) *agentCounts { return &b.counts[a.idx] }
+
+// kind returns the kind of the i-th timed event, in the typed format
+// whatever the log.
+func (b *builder) kind(i int) evtc.StateChange {
+	if b.kinds != nil {
+		return b.kinds[i]
+	}
+	return b.tl.events[i].IsStateChange
+}
+
+// setsBeforeFirstSwap is the number of spans a weapon set series holds
+// before its first swap: 1 when swaps name the set left, 0 in a log older
+// than arcdps 20240627.
+func (b *builder) setsBeforeFirstSwap() int {
+	if b.previousSets {
+		return 1
+	}
+	return 0
+}
 
 // allAgents returns the agents plus the Unknown sentinel.
 func (b *builder) allAgents() []*Agent {
@@ -714,7 +745,7 @@ func (b *builder) scan() {
 	byInst := make([]*Agent, 1<<16)
 
 	for i, e := range events {
-		k := e.IsStateChange
+		k := b.kind(i)
 		var src, dst *Agent
 		if srcIsAgent(k) {
 			src = b.resolve(e.SrcAgent, e.SrcInstanceID, e.Time)
@@ -728,8 +759,8 @@ func (b *builder) scan() {
 				byInst[e.SrcInstanceID] = src
 			}
 		}
-		if dstIsAgent(k) {
-			dst = b.resolve(e.DstAgent, e.DstInstanceID, e.Time)
+		if addr, ok := b.dstAddr(k, e); ok {
+			dst = b.resolve(addr, e.DstInstanceID, e.Time)
 			if dst != src {
 				b.see(dst, e, e.DstInstanceID)
 			}
@@ -823,6 +854,11 @@ func (b *builder) scan() {
 		case evtc.StateEffectGroundCreate, evtc.StateEffectAgentCreate:
 			b.nEffects++
 			b.cnt(src).effects++
+		case evtc.StateEffect2Defunc:
+			if !legacyEffectStops(e) {
+				b.nEffects++
+				b.cnt(legacyEffectAgent(e, src, dst)).effects++
+			}
 		case evtc.StateMissileCreate:
 			b.nMissiles++
 			b.cnt(src).missiles++
@@ -863,16 +899,24 @@ func (b *builder) scan() {
 			// arcdps adds the skill of an extension combat event to the skill
 			// table, so the graph knows it too.
 			b.ensureSkill(e.SkillID)
-		case evtc.StatePosition, evtc.StateTeleport:
+		case evtc.StatePosition:
 			b.cnt(src).pos++
+		case evtc.StateTeleport:
+			if hasTarget(e) {
+				b.cnt(src).pos++
+			}
 		case evtc.StateVelocity:
 			b.cnt(src).vel++
 		case evtc.StateFacing:
 			b.cnt(src).facing++
 		case evtc.StateHealthPctUpdate:
-			b.cnt(src).health++
+			if isPercent(e) {
+				b.cnt(src).health++
+			}
 		case evtc.StateBarrierPctUpdate:
-			b.cnt(src).barrier++
+			if isPercent(e) {
+				b.cnt(src).barrier++
+			}
 		case evtc.StateMaxHealthUpdate:
 			b.cnt(src).maxHealth++
 		case evtc.StateDefianceBarPercent:
@@ -1017,7 +1061,7 @@ func (b *builder) allocateAgents() {
 			c.team += n.team + 1
 		}
 		if n.swaps > 0 {
-			c.swaps += n.swaps + 1
+			c.swaps += n.swaps + b.setsBeforeFirstSwap()
 		}
 		c.stealth += n.stealth
 		c.gliding += n.gliding
@@ -1091,7 +1135,7 @@ func (b *builder) allocateAgents() {
 			a.Team.spans = carve(&team, n.team+1)
 		}
 		if n.swaps > 0 {
-			a.WeaponSet.spans = carve(&swaps, n.swaps+1)
+			a.WeaponSet.spans = carve(&swaps, n.swaps+b.setsBeforeFirstSwap())
 		}
 		a.Stealth.spans = carve(&stealth, n.stealth)
 		a.Gliding.spans = carve(&gliding, n.gliding)
@@ -1244,11 +1288,12 @@ func (b *builder) fill() {
 			dst.events = append(dst.events, e)
 			b.resolveMaster(dst, e.DstMasterInstanceID, t)
 		}
-		if src == tl.Unknown && tracksAgent(e.IsStateChange) {
+		k := b.kind(i)
+		if src == tl.Unknown && tracksAgent(k) {
 			continue
 		}
 
-		switch e.IsStateChange {
+		switch k {
 		case evtc.StateCombat:
 			b.newHit(e, t, src, dst)
 		case evtc.StateAnimationStart:
@@ -1260,6 +1305,7 @@ func (b *builder) fill() {
 		case evtc.StateBuffRemoveSingle:
 			if s := b.openStacks[trackableID(e)]; s != nil {
 				b.closeStack(s, e, t, remover(e, dst), e.IsBuffRemove)
+				s.Remaining = ms(int64(e.Value))
 			}
 		case evtc.StateBuffRemoveAll:
 			key := stackKey{src, e.SkillID}
@@ -1280,17 +1326,30 @@ func (b *builder) fill() {
 				pushSpan(&s.Active.spans, t, end, false, e)
 			}
 		case evtc.StatePosition:
-			src.Position.samples = append(src.Position.samples, Sample[Vec3]{Time: t, Value: vec3(e), Event: e})
+			n := b.cnt(src)
+			src.Position.samples = append(src.Position.samples, Sample[Vec3]{Time: t, Value: vec3(e), Event: e, Break: n.teleported})
+			n.teleported = false
 		case evtc.StateTeleport:
+			// Without a target the teleport is no position: it breaks the
+			// next one instead of sending the agent to the origin.
+			if !hasTarget(e) {
+				b.cnt(src).teleported = true
+				break
+			}
+			b.cnt(src).teleported = false
 			src.Position.samples = append(src.Position.samples, Sample[Vec3]{Time: t, Value: vec3(e), Event: e, Break: true})
 		case evtc.StateVelocity:
 			src.Velocity.samples = append(src.Velocity.samples, Sample[Vec3]{Time: t, Value: vec3(e), Event: e})
 		case evtc.StateFacing:
 			src.Facing.samples = append(src.Facing.samples, Sample[Vec2]{Time: t, Value: vec2(e), Event: e})
 		case evtc.StateHealthPctUpdate:
-			src.Health.samples = append(src.Health.samples, Sample[float64]{Time: t, Value: percent(e), Event: e})
+			if isPercent(e) {
+				src.Health.samples = append(src.Health.samples, Sample[float64]{Time: t, Value: percent(e), Event: e})
+			}
 		case evtc.StateBarrierPctUpdate:
-			src.Barrier.samples = append(src.Barrier.samples, Sample[float64]{Time: t, Value: percent(e), Event: e})
+			if isPercent(e) {
+				src.Barrier.samples = append(src.Barrier.samples, Sample[float64]{Time: t, Value: percent(e), Event: e})
+			}
 		case evtc.StateMaxHealthUpdate:
 			src.MaxHealth.samples = append(src.MaxHealth.samples, Sample[int64]{Time: t, Value: int64(e.DstAgent), Event: e})
 		case evtc.StateDefianceBarPercent:
@@ -1299,7 +1358,7 @@ func (b *builder) fill() {
 			pushSpan(&src.Defiance.spans, t, end, defianceState(e), e)
 		case evtc.StateChangeUp, evtc.StateSpawn, evtc.StateChangeDown, evtc.StateChangeDead, evtc.StateDespawn:
 			b.changeState(e, t, src)
-			if e.IsStateChange == evtc.StateDespawn {
+			if k == evtc.StateDespawn {
 				// An agent leaves tracking with its buffs: no removal
 				// will be logged for them.
 				for len(b.openByAgent[src.idx]) > 0 {
@@ -1333,7 +1392,7 @@ func (b *builder) fill() {
 			}
 			pushSpan(&src.Team.spans, t, end, uint32(e.DstAgent), e)
 		case evtc.StateWeaponSwap:
-			if len(src.WeaponSet.spans) == 0 {
+			if len(src.WeaponSet.spans) == 0 && b.previousSets {
 				pushSpan(&src.WeaponSet.spans, src.Lifetime.Start, end, uint32(e.Value), nil)
 			}
 			pushSpan(&src.WeaponSet.spans, t, end, uint32(e.DstAgent), e)
@@ -1358,6 +1417,8 @@ func (b *builder) fill() {
 			if f := b.openEffects[trackableID(e)]; f != nil {
 				b.closeEffect(f, e, t)
 			}
+		case evtc.StateEffect2Defunc:
+			b.legacyEffect(e, t, src, dst)
 		case evtc.StateMissileCreate:
 			b.newMissile(e, t, src)
 		case evtc.StateMissileLaunch:
@@ -1496,6 +1557,9 @@ func (b *builder) newHit(e *evtc.Event, t time.Duration, src, dst *Agent) {
 	}
 	if h.IsBuff {
 		h.Damage = e.BuffDamage
+		if b.kinds != nil {
+			h.Result, h.TargetDowned = legacyTick(e)
+		}
 	} else {
 		h.Damage = e.Value
 	}
@@ -1532,7 +1596,7 @@ func (b *builder) nextCast(caster *Agent, skill uint32) *Cast {
 func (b *builder) startCast(e *evtc.Event, t time.Duration, src, dst *Agent) {
 	c := b.nextCast(src, e.SkillID)
 	c.Start = e
-	if e.DstAgent != 0 {
+	if dst != b.tl.Unknown {
 		c.Target = dst
 	}
 	c.Expected = ms(int64(e.Value))
@@ -1606,9 +1670,6 @@ func (b *builder) closeStack(s *BuffStack, e *evtc.Event, t time.Duration, by *A
 	s.Interval.End = t
 	if n := len(s.Active.spans); n > 0 {
 		s.Active.spans[n-1].End = t
-	}
-	if e != nil && e.IsStateChange == evtc.StateBuffRemoveSingle {
-		s.Remaining = ms(int64(e.Value))
 	}
 	delete(b.openStacks, s.ID)
 	key := stackKey{s.Receiver, s.Buff.Skill.ID}
@@ -1941,15 +2002,22 @@ func (b *builder) newEffect(e *evtc.Event, t time.Duration, src *Agent) {
 		Interval: Interval{Start: t, End: b.tl.Duration},
 		Create:   e,
 	}
-	f.GUID = b.tl.GUID(ContentEffect, f.EffectID)
-	if f.Duration == 0 {
-		f.Duration = b.tl.effectDefaults[f.EffectID]
-	}
 	if f.Ground {
 		f.Origin, f.Orientation = groundEffectPlace(e)
 		f.Scale = effectScale(e)
 		f.MovingPlatform = e.IsFlanking != 0
 		f.Flags = uint8(e.IsBuffRemove)
+	}
+	b.addEffect(f)
+}
+
+// addEffect names a new effect, gives it the default duration of its
+// content when the event had none, and lists it.
+func (b *builder) addEffect(f *Effect) {
+	t := f.Interval.Start
+	f.GUID = b.tl.GUID(ContentEffect, f.EffectID)
+	if f.Duration == 0 {
+		f.Duration = b.tl.effectDefaults[f.EffectID]
 	}
 	if f.ID == 0 {
 		// An effect without a trackable id is never removed by an event: it
@@ -1962,7 +2030,7 @@ func (b *builder) newEffect(e *evtc.Event, t time.Duration, src *Agent) {
 		}
 		b.openEffects[f.ID] = f
 	}
-	src.effects = append(src.effects, f)
+	f.Agent.effects = append(f.Agent.effects, f)
 	b.tl.effects = append(b.tl.effects, f)
 }
 
@@ -2018,13 +2086,15 @@ func defianceHits(a *Agent, iv Interval) Hits {
 	return Hits{From(narrow(a.hitsTaken, hitTime, iv))}.Defiance()
 }
 
-// cause finds the hit with the given result received by a around t.
+// cause finds the hit with the given result received by a around t, among
+// those that explain no down or death yet: arcdps can write a death twice
+// in the same millisecond, with a killing blow for each.
 func cause(a *Agent, t time.Duration, r evtc.Result) *Hit {
 	window := Interval{Start: t - CauseWindow, End: t + CauseWindow}
 	var best *Hit
 	var bestDist time.Duration
 	for _, h := range narrow(a.hitsTaken, hitTime, window) {
-		if h.Result != r {
+		if h.Result != r || h.Down != nil || h.Death != nil {
 			continue
 		}
 		dist := max(h.Time-t, t-h.Time)

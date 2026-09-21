@@ -19,7 +19,9 @@ type Cast struct {
 	Stop *evtc.Event
 	// Caster is the casting agent.
 	Caster *Agent
-	// Target is the agent the cast was aimed at, nil when there is none.
+	// Target is the agent the cast was aimed at, nil when there is none
+	// and in every log older than arcdps 20260501, which names no target
+	// (evtc.CapabilityTypedEvents).
 	Target *Agent
 	// Skill is the skill cast.
 	Skill *Skill

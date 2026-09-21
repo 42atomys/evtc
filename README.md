@@ -13,7 +13,7 @@ go get github.com/42atomys/evtc@latest
 
 | Package | Purpose |
 | --- | --- |
-| `github.com/42atomys/evtc` (`evtc`) | Decodes `.evtc` and `.zevtc` files into their header, agent table, skill table and raw events, without interpretation. |
+| `github.com/42atomys/evtc` (`evtc`) | Decodes `.evtc` and `.zevtc` files into their header, agent table, skill table and raw events, without interpretation beyond what a log can carry (`Has`) and what is wrong with it (`Warnings`). |
 | `github.com/42atomys/evtc/timeline` | Builds a temporal graph over a decoded log and lets you query it by time: positions, health, casts, hits, buffs, downs, breakbars. See [timeline/README.md](timeline/README.md). |
 | `github.com/42atomys/evtc/extensions/healingstats` | Decodes the events of the healing stats addon into heals and barrier linked to the timeline; importing it is enough. See [extensions/healingstats/README.md](extensions/healingstats/README.md). |
 | `cmd/evtcparser` | Prints the header and table sizes of a log: `go run ./cmd/evtcparser fight.zevtc`. |
@@ -38,7 +38,21 @@ Each arcdps extension gets a package under `extensions/`, plugged into the
 timeline through a decoder hook (see
 [Extensions](timeline/README.md#extensions)).
 
-Requires Go 1.27. Only logs of arcdps 20260501 and later are supported.
+arcdps keeps adding to the format, so two logs do not hold the same
+data. `Has` tells an empty result from a log that cannot say, and
+`Warnings` lists what is known to be wrong with a log, on the decoded log
+as on its timeline:
+
+```go
+if !tl.Has(evtc.CapabilityStealth) {
+	// written before arcdps 20260602: this log has no stealth to show
+}
+for _, w := range tl.Warnings() {
+	fmt.Println(w.Code, w.Message)
+}
+```
+
+Requires Go 1.27. The timeline reads logs of arcdps 20240613 and later.
 The API may still change before a v1.0.0 tag.
 
 ## Development

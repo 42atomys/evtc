@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -173,10 +174,10 @@ func missiles(tl *timeline.Timeline) {
 			}
 			owners[m.Owner.Name]++
 		}
-		var names []string
-		for n := range owners {
-			names = append(names, n)
-		}
+		// The owners with the most missiles come first.
+		names := slices.SortedFunc(maps.Keys(owners), func(a, b string) int {
+			return cmp.Or(cmp.Compare(owners[b], owners[a]), cmp.Compare(a, b))
+		})
 		fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%v\n", s.Skill.Name, s.Missiles.Count(), strings.Join(names[:min(2, len(names))], ", "), pct(hit, s.Missiles.Count()), (total / time.Duration(s.Missiles.Count())).Round(time.Millisecond))
 	}
 	w.Flush()

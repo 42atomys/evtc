@@ -40,6 +40,11 @@ func coords(b *[64]byte, off int) Vec3 {
 	return Vec3{float32(i16At(b, off)) * 10, float32(i16At(b, off+2)) * 10, float32(i16At(b, off+4)) * 10}
 }
 
+// angles decodes three int16 angles stored as the value times 1000.
+func angles(b *[64]byte, off int) Vec3 {
+	return Vec3{float32(i16At(b, off)) / 1000, float32(i16At(b, off+2)) / 1000, float32(i16At(b, off+4)) / 1000}
+}
+
 // cstrAt decodes the null-terminated string starting at off.
 func cstrAt(b *[64]byte, off int) string {
 	s := b[off:]
@@ -147,9 +152,7 @@ func effectScale(e *evtc.Event) float32 {
 // from the six int16 stored from dst_agent onwards.
 func groundEffectPlace(e *evtc.Event) (origin, orientation Vec3) {
 	b := e.Bytes()
-	origin = coords(&b, offDst)
-	orientation = Vec3{float32(i16At(&b, offDst+6)) / 1000, float32(i16At(&b, offDst+8)) / 1000, float32(i16At(&b, offDst+10)) / 1000}
-	return origin, orientation
+	return coords(&b, offDst), angles(&b, offDst+6)
 }
 
 // missileOrigin decodes the creation point of a missile from value.

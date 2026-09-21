@@ -21,8 +21,8 @@ tl, err := timeline.ParseFile("fight.zevtc") // evtc.ParseFile + timeline.Build
 ```
 
 Requires Go 1.27 (the query types use generic methods). Logs written by
-arcdps builds older than 20260501 use the legacy cast and buff encoding and
-are rejected with `timeline.ErrLegacyLog`.
+arcdps builds older than 20240613 are rejected with
+`timeline.ErrLegacyLog`.
 
 ## The model
 
@@ -105,6 +105,11 @@ hits and events whose source the log does not know; it is never nil.
   and friends. `DistanceTo` returns `NaN` instead, because 0 is a real
   distance. `DefianceStateAt` returns `DefianceNone`. Times of events use
   `(time.Duration, bool)`, because 0 is a valid instant.
+- **Missing data.** A log written by an older arcdps may be unable to say
+  what a newer one does. `tl.Has(evtc.CapabilityJumps)` tells "nobody
+  jumped" from a log that cannot carry jumps: when it is false, an empty
+  result proves nothing. `Missing` lists what the log cannot carry,
+  `Warnings` what is known to be wrong with it.
 - **Movement gaps.** arcdps only samples an agent that moves. Across a gap
   wider than `MoveGap` the last position is held: the agent stood still.
 - **Entities.** Every filter taking an agent accepts a `*Agent`, a
@@ -193,7 +198,7 @@ players, Alpha and Bravo, against Sabetha. The outputs are checked by
 log := cookbookLog() // evtc.ParseFile("fight.zevtc") on a real file
 tl, err := timeline.Build(log)
 if err != nil {
-	panic(err) // timeline.ErrLegacyLog for logs older than arcdps 20260501
+	panic(err) // timeline.ErrLegacyLog for logs older than arcdps 20240613
 }
 fmt.Println(tl.Boss().Name, "fought by", tl.Players().Count(), "players for", tl.Duration)
 fmt.Println("arcdps build", tl.Build, "events", tl.Events().Count(), "hits", tl.Hits().Count())
@@ -532,16 +537,27 @@ reports a death.
 The builder follows the field layout of the arcdps `README.txt`
 (`enum cbtstatechange`). Everything else is kept untouched in `Events()`.
 
+A log older than arcdps 20260501 has no kind for a cast, a buff
+application, a duration change or a buff removal: they are `CBTS_COMBAT`
+events told apart by `is_activation`, `is_buffremove`, `buff`, `value`,
+`buff_dmg` and, for a duration change, `is_offcycle`, as the arcdps README
+of that format lists; a buff tick keeps its cycle in `is_offcycle` and its
+downed flag in `pad61`. `legacy.go` reads them, and the graph is the same,
+short of what that format cannot say: a cast names no target. The nodes
+point to the events as the log holds them, so `Cast.Start` is a
+`CBTS_COMBAT` event there, and `Events().Of` finds no `ANIMATIONSTART`.
+Effects come from `EFFECT2` until arcdps 20250603.
+
 | arcdps state change                                                                                 | fields used                                                                                                                                                                                                                                                                                        | graph                                                                                                                                                                                        |
 | --------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CBTS_COMBAT`                                                                                       | `src_agent`, `dst_agent`, `value` (strike damage) or `buff_dmg` (buff tick), `overstack_value` (barrier part when `is_shields`), `skillid`, `result`, `iff`, `buff`, `is_ninety`, `is_fifty`, `is_moving` (bit 0 source, bit 1 target), `is_flanking`, `is_shields`, `is_offcycle` (target downed) | `Hit`                                                                                                                                                                                        |
 | `ENTERCOMBAT`, `EXITCOMBAT`                                                                         | `src_agent`; on entering, `dst_agent` subgroup, `value` profession and `buff_dmg` elite specialization                                                                                                                                                                                             | `Agent.InCombat`, `Player.Subgroup`, `Profession`, `EliteSpec`                                                                                                                               |
 | `CHANGEUP`, `CHANGEDOWN`, `CHANGEDEAD`, `SPAWN`, `DESPAWN`                                          | `src_agent`                                                                                                                                                                                                                                                                                        | `Agent.Life`, `Downs`, `Deaths`                                                                                                                                                              |
-| `HEALTHPCTUPDATE`, `BARRIERPCTUPDATE`                                                               | `dst_agent` = percent × 10000                                                                                                                                                                                                                                                                      | `Agent.Health`, `Agent.Barrier` (0 to 100)                                                                                                                                                   |
+| `HEALTHPCTUPDATE`, `BARRIERPCTUPDATE`                                                               | `dst_agent` = percent × 10000                                                                                                                                                                                                                                                                      | `Agent.Health`, `Agent.Barrier` (0 to 100); an update that is no percentage, written until arcdps 20260701 for agents without health, is dropped                                             |
 | `MAXHEALTHUPDATE`                                                                                   | `dst_agent`                                                                                                                                                                                                                                                                                        | `Agent.MaxHealth`                                                                                                                                                                            |
 | `SQCOMBATSTART`, `SQCOMBATEND`                                                                      | `value` server time, `buff_dmg` local time, event time                                                                                                                                                                                                                                             | time origin, `Timeline.Start`, `LocalStart`, `Duration`                                                                                                                                      |
 | `POINTOFVIEW`, `MAPID`, `LOGNPCUPDATE`                                                              | `src_agent`; `dst_agent` for the boss                                                                                                                                                                                                                                                              | `Timeline.POV`, `MapID`, `Target.Boss`                                                                                                                                                       |
-| `POSITION`, `VELOCITY`, `TELEPORT`                                                                  | `dst_agent` as float[2] plus `value` as float                                                                                                                                                                                                                                                      | `Agent.Position`, `Velocity` (a teleport breaks interpolation)                                                                                                                               |
+| `POSITION`, `VELOCITY`, `TELEPORT`                                                                  | `dst_agent` as float[2] plus `value` as float                                                                                                                                                                                                                                                      | `Agent.Position`, `Velocity` (a teleport breaks interpolation; one without a target breaks the next position)                                                                                |
 | `FACING`                                                                                            | `dst_agent` as float[2]                                                                                                                                                                                                                                                                            | `Agent.Facing`                                                                                                                                                                               |
 | `ATTACKTARGET`                                                                                      | `src_agent` attack target, `dst_agent` gadget                                                                                                                                                                                                                                                      | `Agent.Gadget`, `AttackTargets`                                                                                                                                                              |
 | `TARGETABLE`                                                                                        | `dst_agent` 0, 1 or 2 (unsupported, read as false)                                                                                                                                                                                                                                                 | `Agent.Targetable`                                                                                                                                                                           |
@@ -559,6 +575,7 @@ The builder follows the field layout of the arcdps `README.txt`
 | `MARKER`, `SQUADMARKER_GROUND`                                                                      | `value` id (0 removes every marker of the agent) and `buff` commander flag; `src_agent` as float[3] (zero or infinite to remove) and `skillid` index                                                                                                                                               | `Agent.Markers`, `Timeline.GroundMarkers`, each from its application or placement to its removal; a removal with nothing to remove, or a marker written again while worn, is not attached    |
 | `GUILD`, `TEAMCHANGE`, `WEAPSWAP`, `STEALTHCHANGE`, `GLIDER`, `TRANSFORMATION`, `STUNBREAK`, `TICK` | `dst_agent` as 16 bytes; `dst_agent` new and `value` old; `dst_agent` state; `value`; `skillid` and `value`; `value`; `value` ping                                                                                                                                                                 | `Player.Guild`, `Agent.Team`, `WeaponSet`, `Stealth`, `Gliding`, `Transformation`, `StunBreaks`, `Timeline.Ping`                                                                             |
 | `EFFECTGROUNDCREATE`, `EFFECTAGENTCREATE`, `EFFECTGROUNDREMOVE`, `EFFECTAGENTREMOVE`                | `dst_agent` as int16[6] (origin over ten, orientation times a thousand), `iff` as uint32 duration, `is_buffremove` flags, `is_flanking`, `is_shields` as int16 scale, `pad61` id                                                                                                                   | `Effect`                                                                                                                                                                                     |
+| `EFFECT2`, until arcdps 20250603                                                                    | `src_agent` owner, `dst_agent` agent the effect plays at or `value` as float[3] origin, `skillid` effect, `iff` duration, `is_buffremove` trackable id, `is_flanking`, `is_shields` as int16[3] orientation                                                                                        | the same `Effect` nodes; an event naming no agent and no place ends the effect of its trackable id                                                                                           |
 | `MISSILECREATE`, `MISSILELAUNCH`, `MISSILEREMOVE`, `MISSILEEFFECT`                                  | `value` as int16[3] or int16[6] coordinates over ten, `overstack_value` skin, `dst_agent` target or owner, `iff` motion, `result` radius, `is_buffremove` flags, `is_flanking`, `is_shields` speed, `pad61` id                                                                                     | `Missile`, `Launch`, `MissileEffect`                                                                                                                                                         |
 | `JUMP`, `GADGETNAME`, `GADGETANIMATION`                                                             | `dst_agent` 1 leaving the ground or 0 landing; `dst_agent` 0, 1 or 2 (unsupported, read as hidden); `dst_agent` token                                                                                                                                                                              | `Agent.Airborne`, `NameVisible`, `GadgetAnimations`                                                                                                                                          |
 | `REWARD`, `MAPCHANGE`, `INTEGRITY`                                                                  | `dst_agent` id and `value` type; `src_agent` new map, `dst_agent` old map and `value` type; `time` as char[32]                                                                                                                                                                                     | `Timeline.Rewards`, `MapChanges`, `Integrity`                                                                                                                                                |
@@ -582,13 +599,19 @@ root and skip otherwise. `go run ./examples/sabetha` prints a full report
 of that log written with the public API.
 
 `EVTC_REAL_LOGS=1 go test ./timeline -run TestRealLogs -v` builds every
-log under `tests_fixtures/`, checks the invariants, runs the API on each
-and reports how much of every log the graph consumes: over 152 logs of
-raids, strikes, fractals and convergences (27.9 million events), 96.9% of
-the events are held by a node or read into a field, the rest being
-remove-all summaries, marker removals on agents and ground positions that
-wore none (96% of the marker events arcdps writes), capture points and a
-few removes whose creation predates the log.
+log under `tests_fixtures/`, or under the folder the variable names
+instead of 1 (relative to the repository root, or absolute), checks the
+invariants, runs the API on each, checks a log of arcdps 20260501 or
+later builds the same graph once written the older way, and reports how
+much of every log the graph consumes. Over 10,548 logs of raids, strikes,
+fractals, convergences and training golems (1.57 billion events), 78.6%
+of the events are held by a node or read into a field. Most of the rest,
+19% of the events, are the barrier updates arcdps wrote until 20260701
+for agents without health, which hold no percentage. Then come remove-all
+summaries, marker removals on agents and ground positions that wore none
+(90% of the marker events arcdps writes), capture points, gadget models,
+teleports without a target and a few removes whose creation predates the
+log.
 
 ## Extensions
 
@@ -608,6 +631,7 @@ accepts them.
 
 ## Not modeled
 
-Capture points (`GADGETCAPTURE*`), WvW objectives and the retired
-`RATEHEALTH` are only available as raw events. The graph does not guess
-which player a boss is chasing: the log carries no aggro information.
+Capture points (`GADGETCAPTURE*`), gadget models (`GADGETMODELINFO`), WvW
+objectives and the retired `RATEHEALTH` are only available as raw events.
+The graph does not guess which player a boss is chasing: the log carries no
+aggro information.

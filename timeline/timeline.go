@@ -10,14 +10,16 @@ import (
 	"github.com/42atomys/evtc"
 )
 
-// MinBuild is the first arcdps build whose logs encode casts and buffs as
-// dedicated state changes. Older logs use the legacy encoding, which this
-// package does not support.
-const MinBuild = 20260501
+// MinBuild is the oldest arcdps build Build accepts, the oldest one whose
+// logs this package was checked on. Logs older than arcdps 20260501 write
+// casts and buff events as StateCombat events; Build reads both formats
+// into the same graph, see evtc.CapabilityTypedEvents.
+const MinBuild = 20240613
 
 // ErrLegacyLog is returned by Build for logs written by an arcdps build
-// older than 20260501.
-var ErrLegacyLog = errors.New("timeline: legacy log encoding is not supported")
+// older than MinBuild. The format older than arcdps 20260501 is no reason
+// for it: Build reads that format down to MinBuild.
+var ErrLegacyLog = fmt.Errorf("timeline: log older than %d cannot be read", MinBuild)
 
 // InstanceTolerance is how far outside an agent lifetime an instance id
 // lookup still matches that agent.
@@ -119,6 +121,11 @@ type Timeline struct {
 	// id to GUID associations.
 	effectDefaults map[uint32]time.Duration
 	extensions     map[uint32]*Extension
+	// capabilities and missing split what the log can carry from what it
+	// cannot, warnings is what is known to be wrong with it.
+	capabilities []evtc.Capability
+	missing      []evtc.Capability
+	warnings     []evtc.Warning
 }
 
 // Build constructs the timeline of a decoded log.
@@ -134,6 +141,11 @@ func Build(l *evtc.Log) (*Timeline, error) {
 		return nil, fmt.Errorf("%w: build %d is older than %d", ErrLegacyLog, build, MinBuild)
 	}
 	b := &builder{tl: &Timeline{Log: l, Build: build}, log: l}
+	// Surveyed before the build, so that an extension decoder can ask Has.
+	b.tl.survey()
+	if b.tl.warned(evtc.WarningBuild) {
+		return nil, fmt.Errorf("timeline: invalid build date %q", l.Header.Build)
+	}
 	return b.run(), nil
 }
 

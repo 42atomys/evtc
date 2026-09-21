@@ -13,9 +13,13 @@ const msec = time.Millisecond
 
 func TestBuildRejectsLegacyLogs(t *testing.T) {
 	l := fixture().build(1000)
-	l.Header.Build = "20260101"
+	l.Header.Build = "20240612"
 	if _, err := Build(l); !errors.Is(err, ErrLegacyLog) {
 		t.Errorf("err = %v, want ErrLegacyLog", err)
+	}
+	l.Header.Build = "20240613"
+	if _, err := Build(l); err != nil {
+		t.Errorf("build %d refused: %v", MinBuild, err)
 	}
 	l.Header.Build = "garbage!"
 	if _, err := Build(l); err == nil {
