@@ -19,7 +19,9 @@ type Cast struct {
 	Stop *evtc.Event
 	// Caster is the casting agent.
 	Caster *Agent
-	// Target is the agent the cast was aimed at, nil when there is none.
+	// Target is the agent the cast was aimed at, nil when there is none
+	// and in every log older than arcdps 20260501, which names no target
+	// (evtc.CapabilityTypedEvents).
 	Target *Agent
 	// Skill is the skill cast.
 	Skill *Skill
@@ -85,20 +87,20 @@ func (q Casts) Between(iv Interval) Casts {
 
 // By keeps the casts of e.
 func (q Casts) By(e Entity) Casts {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.none() {
 		return q.Where(never[Cast])
 	}
-	return q.Where(func(c *Cast) bool { return c.Caster == a })
+	return q.Where(func(c *Cast) bool { return w.is(c.Caster) })
 }
 
 // On keeps the casts aimed at e.
 func (q Casts) On(e Entity) Casts {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.none() {
 		return q.Where(never[Cast])
 	}
-	return q.Where(func(c *Cast) bool { return c.Target == a })
+	return q.Where(func(c *Cast) bool { return w.is(c.Target) })
 }
 
 // OfSkill keeps the casts of the skill id.

@@ -18,7 +18,8 @@ type Header struct {
 	// Revision of the cbtevent structure. Only revision 1 is supported.
 	Revision uint8
 	// TargetSpeciesID is the species id of the logged boss. A value of 1
-	// means a WvW log, 2 means a map log.
+	// means a WvW log, 2 means a map log. In a log older than 20221126 a
+	// value of 1 is a generic log, see WarningGenericTarget.
 	TargetSpeciesID uint16
 }
 
@@ -42,7 +43,11 @@ type Agent struct {
 	HitboxWidth uint16
 	// Condition is the condition damage of a player, as arcdps reports it.
 	Condition int16
-	// HitboxHeight is the hitbox height of the agent.
+	// HitboxHeight is what arcdps called the hitbox height of the agent
+	// until it retired the field, saying it never was one. It is 0 for
+	// players and NPCs from arcdps 20251118.
+	//
+	// Deprecated: always 0 from arcdps 20260602.
 	HitboxHeight uint16
 	// Name is the agent name, decoded from the 64-byte combo string
 	// "name\0account\0subgroup\0".
@@ -96,7 +101,8 @@ type Event struct {
 	Buff uint8
 	// Result is the outcome of a strike, or a payload.
 	Result Result
-	// IsActivation is the activation kind of a legacy cast event.
+	// IsActivation is how a cast ended. Before arcdps 20260501 it also
+	// marks the start of one.
 	IsActivation Activation
 	// IsBuffRemove is the kind of a buff removal.
 	IsBuffRemove BuffRemove
@@ -116,7 +122,9 @@ type Event struct {
 	// buff was active on application.
 	IsShields uint8
 	// IsOffcycle is set when the destination was down, or carries the
-	// category of a buff.
+	// category of a buff. Before arcdps 20260501 it is the BuffCycle of a
+	// buff tick, whose downed flag is Pad61, and it tells a duration
+	// change, where it is set, from a buff application.
 	IsOffcycle uint8
 	// Pad61 to Pad64 are four pad bytes carrying event-specific data, such
 	// as the trackable id of buff, missile and effect events.
@@ -133,6 +141,11 @@ type Log struct {
 	Skills []Skill
 	// Events are the combat events, in file order.
 	Events []Event
+
+	// seen keeps what Has and Warnings observe in the events of a parsed
+	// log. A log assembled by hand leaves it nil and is scanned at each
+	// call, as a copy is.
+	seen *observation
 }
 
 // Bytes returns the 64-byte wire layout of the event, so that the payloads

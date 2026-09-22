@@ -111,11 +111,11 @@ func (q Missiles) At(t time.Duration) Missiles { return q.Between(At(t)) }
 
 // By keeps the missiles owned by e.
 func (q Missiles) By(e Entity) Missiles {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.none() {
 		return q.Where(never[Missile])
 	}
-	return q.Where(func(m *Missile) bool { return m.Owner == a })
+	return q.Where(func(m *Missile) bool { return w.is(m.Owner) })
 }
 
 // OfSkill keeps the missiles of the skill id.

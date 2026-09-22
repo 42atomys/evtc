@@ -40,7 +40,9 @@ An `Agent` node exists for every agent of the timeline, so `h.Agent(p)` is
 never nil for a player, target or agent of `tl`. The node embeds the
 timeline agent: `node.Name`, `node.PositionAt(t)`, `node.Hits()` all work,
 and the node is accepted wherever the timeline takes an `Entity`
-(`tl.Hits().By(node)`).
+(`tl.Hits().By(node)`). A player stands for the node of their main
+character, the filters `By`, `CreditedTo` and `On` given a player match
+every character, and `Players()` holds one node per character.
 
 `Heals` is a query with the lazy semantics of `timeline.Query`: filters
 compose a predicate, `Skip`, `Limit` and `Reverse` describe the traversal,
@@ -233,6 +235,7 @@ machine; the integration tests run when
 `tests_fixtures/sabetha-05-fd9b6f3a.zevtc` is present at the repository
 root and skip otherwise, and
 `EVTC_REAL_LOGS=1 go test ./extensions/healingstats -run TestRealLogs -v`
-decodes every log under `tests_fixtures/` and reports, per log, the
-heals, the records merged and the heals between recording players that
-only one client wrote.
+decodes every log under `tests_fixtures/`, or under the folder the
+variable names instead of 1 (relative to the repository root, or
+absolute), and reports, per log, the heals, the records merged and the
+heals between recording players that only one client wrote.

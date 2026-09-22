@@ -19,9 +19,11 @@ func TestEnumValues(t *testing.T) {
 		{"ActivationUnknown", int(ActivationUnknown), 7},
 		{"BuffRemoveManual", int(BuffRemoveManual), 3},
 		{"BuffRemoveUnknown", int(BuffRemoveUnknown), 4},
+		{"BuffCycleNotCycleDmgToTargetOnStackRemove", int(BuffCycleNotCycleDmgToTargetOnStackRemove), 5},
 		{"LanguageFrench", int(LanguageFrench), 2},
 		{"LanguageChinese", int(LanguageChinese), 5},
-		{"ContentLocalTransformation", int(ContentLocalTransformation), 5},
+		{"ContentLocalTeam", int(ContentLocalTeam), 4},
+		{"ContentLocalTransformation", int(ContentLocalTransformation), 6},
 		{"SkillDodge", SkillDodge, 23275},
 		{"SkillWeaponDraw", SkillWeaponDraw, 23284},
 		{"SkillEmote", SkillEmote, 23303},
@@ -45,6 +47,7 @@ func TestEnumString(t *testing.T) {
 		{Result(200), "Result(200)"},
 		{ActivationReset, "Reset"},
 		{BuffRemoveAll, "All"},
+		{BuffCycleNotCycle, "NotCycle"},
 		{LanguageGerman, "German"},
 		{Language(1), "Language(1)"},
 		{ContentLocalSkill, "Skill"},
@@ -67,6 +70,7 @@ func TestEnumNamesComplete(t *testing.T) {
 		"result":       {resultNames, int(ResultUnknown)},
 		"activation":   {activationNames, int(ActivationUnknown)},
 		"buffRemove":   {buffRemoveNames, int(BuffRemoveUnknown)},
+		"buffCycle":    {buffCycleNames, int(BuffCycleUnknown)},
 		"contentLocal": {contentLocalNames, int(ContentLocalTransformation)},
 	}
 	for name, tb := range tables {

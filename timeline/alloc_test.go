@@ -3,6 +3,8 @@ package timeline
 import (
 	"testing"
 	"time"
+
+	"github.com/42atomys/evtc"
 )
 
 // TestQueryAllocations pins the allocation profile of the hot query paths:
@@ -11,7 +13,7 @@ import (
 // allocate it.
 func TestQueryAllocations(t *testing.T) {
 	tl := mustBuild(t, genLog(genOptions{players: 8, adds: 6, duration: 60 * time.Second, seed: 5}))
-	boss, p := tl.targets[0], tl.players[0]
+	boss, p := tl.targets[0], tl.characters[0]
 	iv := NewInterval(10*time.Second, 20*time.Second)
 	at := 15 * time.Second
 	var sink int
@@ -60,6 +62,7 @@ func TestQueryAllocations(t *testing.T) {
 		{"Ping.At", 0, func() { tl.Ping.At(at) }},
 		{"WeaponSetAt", 0, func() { p.WeaponSetAt(at) }},
 		{"PingAt", 0, func() { tl.PingAt(at) }},
+		{"Has", 0, func() { tl.Has(evtc.CapabilityStealth) }},
 		{"Hits.Foes.Count", 0, func() { sink = p.Hits().Foes().Count() }},
 		{"Stacks.RemovedBy.Count", 1, func() { sink = tl.Stacks().RemovedBy(p).Count() }},
 		{"Stacks.EffectiveAt", 3, func() { sink = p.Stacks().EffectiveAt(at) }},
@@ -82,7 +85,7 @@ func TestQueryAllocations(t *testing.T) {
 		{"DownedBetween", 0, func() { p.DownedBetween(iv) }},
 		{"Boss", 0, func() { tl.Boss() }},
 		{"TargetBySpeciesIDAt", 0, func() { tl.TargetBySpeciesIDAt(boss.SpeciesID, at) }},
-		{"PlayerByAccount", 0, func() { tl.PlayerByAccount(p.Account) }},
+		{"PlayerByAccount", 0, func() { tl.PlayerByAccount(p.Player.Account) }},
 		{"Since", 0, func() { tl.Since(at) }},
 		{"IsAirborneAt", 0, func() { p.IsAirborneAt(at) }},
 		{"IsNameVisibleAt", 0, func() { tl.Gadgets().First().IsNameVisibleAt(at) }},

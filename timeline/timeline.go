@@ -10,14 +10,16 @@ import (
 	"github.com/42atomys/evtc"
 )
 
-// MinBuild is the first arcdps build whose logs encode casts and buffs as
-// dedicated state changes. Older logs use the legacy encoding, which this
-// package does not support.
-const MinBuild = 20260501
+// MinBuild is the oldest arcdps build Build accepts, the oldest one whose
+// logs this package was checked on. Logs older than arcdps 20260501 write
+// casts and buff events as StateCombat events; Build reads both formats
+// into the same graph, see evtc.CapabilityTypedEvents.
+const MinBuild = 20240613
 
 // ErrLegacyLog is returned by Build for logs written by an arcdps build
-// older than 20260501.
-var ErrLegacyLog = errors.New("timeline: legacy log encoding is not supported")
+// older than MinBuild. The format older than arcdps 20260501 is no reason
+// for it: Build reads that format down to MinBuild.
+var ErrLegacyLog = fmt.Errorf("timeline: log older than %d cannot be read", MinBuild)
 
 // InstanceTolerance is how far outside an agent lifetime an instance id
 // lookup still matches that agent.
@@ -93,28 +95,37 @@ type Timeline struct {
 	// registration order.
 	Extensions []*Extension
 
-	agents   []*Agent
-	players  []*Player
-	targets  []*Target
-	npcs     []*Agent
-	gadgets  []*Agent
-	byAddr   map[uint64]*Agent
-	alias    map[uint64]uint64
-	byInst   map[uint16][]*Agent
-	skills   map[uint32]*Skill
-	buffs    map[uint32]*Buff
-	epoch    uint64
-	events   []*evtc.Event
-	hits     []*Hit
-	casts    []*Cast
-	stacks   []*BuffStack
-	effects  []*Effect
-	missiles []*Missile
-	guids    map[contentKey]GUID
+	agents     []*Agent
+	players    []*Player
+	characters []*Character
+	targets    []*Target
+	npcs       []*Agent
+	gadgets    []*Agent
+	byAddr     map[uint64]*Agent
+	alias      map[uint64]uint64
+	// sharedInst tells apart the agents registered under one address, by
+	// instance id.
+	sharedInst map[uint64]map[uint16]*Agent
+	byInst     map[uint16][]*Agent
+	skills     map[uint32]*Skill
+	buffs      map[uint32]*Buff
+	epoch      uint64
+	events     []*evtc.Event
+	hits       []*Hit
+	casts      []*Cast
+	stacks     []*BuffStack
+	effects    []*Effect
+	missiles   []*Missile
+	guids      map[contentKey]GUID
 	// effectDefaults holds the default duration of effect ids, from the
 	// id to GUID associations.
 	effectDefaults map[uint32]time.Duration
 	extensions     map[uint32]*Extension
+	// capabilities and missing split what the log can carry from what it
+	// cannot, warnings is what is known to be wrong with it.
+	capabilities []evtc.Capability
+	missing      []evtc.Capability
+	warnings     []evtc.Warning
 }
 
 // Build constructs the timeline of a decoded log.
@@ -130,6 +141,11 @@ func Build(l *evtc.Log) (*Timeline, error) {
 		return nil, fmt.Errorf("%w: build %d is older than %d", ErrLegacyLog, build, MinBuild)
 	}
 	b := &builder{tl: &Timeline{Log: l, Build: build}, log: l}
+	// Surveyed before the build, so that an extension decoder can ask Has.
+	b.tl.survey()
+	if b.tl.warned(evtc.WarningBuild) {
+		return nil, fmt.Errorf("timeline: invalid build date %q", l.Header.Build)
+	}
 	return b.run(), nil
 }
 
@@ -160,12 +176,25 @@ func (tl *Timeline) Gadgets() Agents { return Agents{From(tl.gadgets)} }
 
 // Agent returns the agent with the given address, following address
 // changes, or nil when there is none. Address 0, which the log writes when
-// it does not know the agent, returns Unknown.
+// it does not know the agent, returns Unknown. The characters of a player
+// share their address, and Agent returns the first of them.
 func (tl *Timeline) Agent(addr uint64) *Agent {
 	if addr == 0 {
 		return tl.Unknown
 	}
 	return tl.byAddr[tl.canonical(addr)]
+}
+
+// AgentOf returns the agent an event names by address and instance id. It
+// is Agent(addr), except among the characters of a player, who share
+// their address: there the instance id picks the character.
+func (tl *Timeline) AgentOf(addr uint64, inst uint16) *Agent {
+	if len(tl.sharedInst) != 0 && inst != 0 {
+		if a := tl.sharedInst[tl.canonical(addr)][inst]; a != nil {
+			return a
+		}
+	}
+	return tl.Agent(addr)
 }
 
 // canonical follows the address changes recorded by StateIIDChange events
@@ -244,8 +273,13 @@ func (tl *Timeline) WallClock(t time.Duration) time.Time { return tl.Start.Add(t
 // It is only meaningful for events whose Time field is a timestamp.
 func (tl *Timeline) TimeOf(e *evtc.Event) time.Duration { return tl.rel(e.Time) }
 
-// Players returns every player of the log, in table order.
+// Players returns the players of the log, one per account, in the table
+// order of their first character.
 func (tl *Timeline) Players() Players { return Players{From(tl.players)} }
+
+// Characters returns the characters the players brought on the field, in
+// the order of Players and, for one player, in order of appearance.
+func (tl *Timeline) Characters() Characters { return Characters{From(tl.characters)} }
 
 // Hits returns every hit of the log, in time order.
 func (tl *Timeline) Hits() Hits { return Hits{From(tl.hits)} }
@@ -305,11 +339,22 @@ func (tl *Timeline) PlayerByAccount(account string) *Player {
 	return nil
 }
 
-// PlayerByName returns the player with the given character name, or nil.
+// PlayerByName returns the player who brought the character with the
+// given name, or nil.
 func (tl *Timeline) PlayerByName(name string) *Player {
+	if c := tl.CharacterByName(name); c != nil {
+		return c.Player
+	}
+	return nil
+}
+
+// CharacterByName returns the character with the given name, or nil.
+func (tl *Timeline) CharacterByName(name string) *Character {
 	for _, p := range tl.players {
-		if p.Name == name {
-			return p
+		for _, c := range p.characters {
+			if c.Name == name {
+				return c
+			}
 		}
 	}
 	return nil

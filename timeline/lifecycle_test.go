@@ -24,7 +24,7 @@ func TestStatesDownsDeaths(t *testing.T) {
 	b.state(7000, addrP2, evtc.StateChangeDead)
 	tl := mustBuild(t, b.build(10000))
 
-	p1, p2, boss := tl.players[0], tl.players[1], tl.targets[0]
+	p1, p2, boss := tl.characters[0], tl.characters[1], tl.targets[0]
 	for _, tt := range []struct {
 		at   time.Duration
 		want LifeState
@@ -85,6 +85,34 @@ func TestStatesDownsDeaths(t *testing.T) {
 	}
 }
 
+// TestDeathWrittenTwice checks a death written twice in the same
+// millisecond, as arcdps does at times: each death gets its own killing
+// blow, and a death left without one has no cause.
+func TestDeathWrittenTwice(t *testing.T) {
+	b := fixture()
+	b.hit(5000, addrBoss, addrP1, skillSlam, 0, evtc.ResultKillingBlow)
+	b.hit(5000, addrBoss, addrP1, skillHeat, 0, evtc.ResultKillingBlow)
+	b.state(5000, addrP1, evtc.StateChangeDead)
+	b.state(5000, addrP1, evtc.StateChangeDead)
+	b.hit(7000, addrBoss, addrP2, skillSlam, 0, evtc.ResultKillingBlow)
+	b.state(7000, addrP2, evtc.StateChangeDead)
+	b.state(7000, addrP2, evtc.StateChangeDead)
+	tl := mustBuild(t, b.build(10000))
+
+	p1, p2 := tl.characters[0], tl.characters[1]
+	if len(p1.Deaths) != 2 || len(p2.Deaths) != 2 {
+		t.Fatalf("deaths = %d and %d, want 2 and 2", len(p1.Deaths), len(p2.Deaths))
+	}
+	first, second := p1.Deaths[0], p1.Deaths[1]
+	if first.Cause == nil || second.Cause == nil || first.Cause == second.Cause || first.Cause.Death != first || second.Cause.Death != second {
+		t.Errorf("causes of the two deaths = %+v and %+v", first.Cause, second.Cause)
+	}
+	if p2.Deaths[0].Cause == nil || p2.Deaths[0].Cause.Death != p2.Deaths[0] || p2.Deaths[1].Cause != nil {
+		t.Errorf("causes with one killing blow = %+v and %+v", p2.Deaths[0].Cause, p2.Deaths[1].Cause)
+	}
+	checkInvariants(t, tl)
+}
+
 func TestBreakbar(t *testing.T) {
 	b := fixture()
 	b.defianceState(500, addrAdd, DefianceNone)
@@ -111,8 +139,8 @@ func TestBreakbar(t *testing.T) {
 	if bb.Interval != NewInterval(time.Second, 3*time.Second) || !bb.Broken() || bb.Agent != add || len(bb.hits) != 3 {
 		t.Errorf("breakbar = %+v", bb)
 	}
-	if bb.TotalCC() != 150 || bb.CC(tl.players[0]) != 100 || bb.CC(tl.players[1]) != 50 || bb.CC(tl.Unknown) != 0 {
-		t.Errorf("CC = %d, p1 %d", bb.TotalCC(), bb.CC(tl.players[0]))
+	if bb.TotalCC() != 150 || bb.CC(tl.characters[0]) != 100 || bb.CC(tl.characters[1]) != 50 || bb.CC(tl.Unknown) != 0 {
+		t.Errorf("CC = %d, p1 %d", bb.TotalCC(), bb.CC(tl.characters[0]))
 	}
 	if bb.Percent.Len() != 3 {
 		t.Errorf("percent samples = %d", bb.Percent.Len())

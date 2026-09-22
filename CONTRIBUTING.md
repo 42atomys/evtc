@@ -32,14 +32,16 @@ logs under `tests_fixtures/`, which git ignores:
   log of the folder, checks the invariants of the graph and reports how
   much of each log it reads. The same command on
   `./extensions/healingstats` reports the heals of the logs recorded with
-  the healing stats addon.
+  the healing stats addon. Both take a folder instead of 1, relative to
+  the repository root or absolute.
 - The `TestSample*` tests assert exact values of one Sabetha log
   (`tests_fixtures/sabetha-05-fd9b6f3a.zevtc`) and only pass on that file.
 
 ## How the code is organized
 
-- Package `evtc` decodes the file and nothing else. Interpretation belongs
-  to `timeline`.
+- Package `evtc` decodes the file. Interpretation belongs to `timeline`,
+  with one exception: `capability.go` and `warning.go` read the events
+  far enough to tell what a log can carry and what is wrong with it.
 - The timeline builder works in two passes: `scan` counts every node and
   edge, `fill` creates and links them in arenas sized from those counts.
   Both passes must skip the same events. `checkInvariants`
@@ -64,7 +66,9 @@ modeling it. Then add the node or field, its count in `scan`, its arena,
 its linking in `fill`, the invariants, a fixture helper in
 `helpers_test.go`, a unit test, coverage in the synthetic generator
 (`gen_test.go`) and a row in the table "What is read from the log" of
-`timeline/README.md`.
+`timeline/README.md`. A kind added by a new arcdps release also gets a
+`Capability` (a constant and its row of `capabilityTable`), dated by the
+first build that writes usable data.
 
 ## Adding an extension
 

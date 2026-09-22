@@ -171,7 +171,7 @@ func TestWindowOnQueries(t *testing.T) {
 	b.buffApply(3000, addrP2, addrP1, skillBuff, 1000, 3)
 	b.buffRemoveSingle(3500, addrP1, 0, skillBuff, 0, 3, evtc.BuffRemoveSingle)
 	tl := mustBuild(t, b.build(10000))
-	p1 := tl.players[0]
+	p1 := tl.characters[0]
 	damage := func(h *Hit) int32 { return h.Damage }
 
 	hits := p1.Hits()

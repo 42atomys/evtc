@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -29,8 +30,8 @@ func session(tl *timeline.Timeline) {
 	fmt.Printf("language %v, game build %d, shard %d, ruleset %v, fractal scale %d\n", tl.Language, tl.GameBuild, tl.ShardID, tl.Ruleset, tl.FractalScale)
 	fmt.Printf("arcdps %q, instance started %v before the fight, ended by map exit: %v\n", tl.ArcBuild, tl.Start.Sub(tl.InstanceStart).Round(time.Second), tl.EndedByMapExit)
 	if c := tl.Commander(); c != nil {
-		fmt.Println("commander:", c.Name, "guild", c.Guild)
-		for _, m := range c.Markers {
+		fmt.Println("commander:", c.Main().Name, "guild", c.Guild)
+		for _, m := range c.Main().Markers {
 			if m.Commander {
 				fmt.Printf("  %v tag (catmander %v) worn %v\n", m.Tag, m.Catmander, m.Interval)
 			}
@@ -52,7 +53,7 @@ func session(tl *timeline.Timeline) {
 		hi, _ := tl.Ping.MaxBetween(tl.Interval())
 		fmt.Printf("ping between %d and %d ms\n", lo, hi)
 	}
-	for p := range tl.Players().Seq() {
+	for p := range tl.Characters().Seq() {
 		if len(p.Markers) > 0 {
 			fmt.Printf("  %s wore %d markers, team %d\n", p.Name, len(p.Markers), p.TeamAt(tl.Duration))
 		}
@@ -64,7 +65,7 @@ func agentStates(tl *timeline.Timeline) {
 	w := table()
 	fmt.Fprintln(w, "player\tswaps\tsets used\tstealth state\tgliding\ttransformations\tstun breaks")
 	span := tl.Interval()
-	for p := range tl.Players().Seq() {
+	for p := range tl.Characters().Seq() {
 		swaps := max(p.WeaponSet.Len()-1, 0)
 		sets := map[uint32]bool{}
 		for sp := range p.WeaponSet.Seq() {
@@ -110,7 +111,7 @@ func activity(tl *timeline.Timeline) {
 	w := table()
 	fmt.Fprintln(w, "player\tquickness present\tactive\teffective\tmight present\tactive\teffective")
 	at := tl.Duration / 2
-	for p := range tl.Players().Seq() {
+	for p := range tl.Characters().Seq() {
 		q := p.Stacks().OfBuff(timeline.BuffQuickness)
 		m := p.Stacks().OfBuff(timeline.BuffMight)
 		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%d\n", p.Name, q.CountAt(at), q.ActiveAt(at).Count(), q.EffectiveAt(at), m.CountAt(at), m.ActiveAt(at).Count(), m.EffectiveAt(at))
@@ -173,10 +174,10 @@ func missiles(tl *timeline.Timeline) {
 			}
 			owners[m.Owner.Name]++
 		}
-		var names []string
-		for n := range owners {
-			names = append(names, n)
-		}
+		// The owners with the most missiles come first.
+		names := slices.SortedFunc(maps.Keys(owners), func(a, b string) int {
+			return cmp.Or(cmp.Compare(owners[b], owners[a]), cmp.Compare(a, b))
+		})
 		fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%v\n", s.Skill.Name, s.Missiles.Count(), strings.Join(names[:min(2, len(names))], ", "), pct(hit, s.Missiles.Count()), (total / time.Duration(s.Missiles.Count())).Round(time.Millisecond))
 	}
 	w.Flush()
@@ -206,7 +207,7 @@ func gadgets(tl *timeline.Timeline) {
 	}
 	w.Flush()
 	jumps := 0
-	for p := range tl.Players().Seq() {
+	for p := range tl.Characters().Seq() {
 		jumps += p.Airborne.Len()
 	}
 	fmt.Printf("%d agents with animations or a name state, %d jump events\n", len(agents), jumps)

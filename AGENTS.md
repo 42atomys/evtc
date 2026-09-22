@@ -12,7 +12,7 @@ outside the standard library. `cmd/` holds one small command.
 
 | Path                       | Role                                                                                                                                                                                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `.` (package `evtc`)       | Raw decoder: `.evtc`/`.zevtc` file to header, agent table, skill table and events. No interpretation.                                                                                                                                                  |
+| `.` (package `evtc`)       | Raw decoder: `.evtc`/`.zevtc` file to header, agent table, skill table and events. No interpretation beyond `Has` and `Warnings`.                                                                                                                      |
 | `timeline/`                | Temporal graph over a decoded log: agents, hits, casts, buff stacks, effects, missiles, states over time, lazy queries. The main API. Core arcdps only: extension events stay attached to their `Extension` and go to a registered `ExtensionDecoder`. |
 | `extensions/healingstats/` | Decoder of the healing stats addon: heals and barrier as nodes linked to the timeline agents, skills and casts, with `Heals` queries. One package per extension under `extensions/`, each registering its decoder in `init`.                           |
 | `cmd/evtcparser/`          | Tiny command printing a log summary.                                                                                                                                                                                                                   |
@@ -39,6 +39,10 @@ the graph. The arcdps reference is
   values.
 - `events.go`: which event kinds carry agents or a time (`srcIsAgent`,
   `dstIsAgent`, `hasTime`) and the raw `Events` query.
+- `capability.go`: `Has`, `Capabilities`, `Missing` and `Warnings` of
+  `Timeline`. `Build` asks the decoded log once (`survey`), before the
+  build so that an extension decoder can call `Has`, keeps the answers,
+  and refuses a build date the log calls invalid.
 - `extension.go`: the `Extension` node, the `ExtensionDecoder` interface
   and the registry (`RegisterExtension`); `decodeExtensions` in `build.go`
   runs the decoders after `finish`.
@@ -88,7 +92,9 @@ the graph. The arcdps reference is
   inlinable loop for the plain forward case: check `BenchmarkHitsFiltered`
   and `BenchmarkHitsAll` after touching it. `TestQueryAllocations` pins
   0 allocations on point lookups and lazy terminals.
-- Package `evtc` is a raw decoder. Interpretation belongs to `timeline`.
+- Package `evtc` is a raw decoder. Interpretation belongs to `timeline`,
+  with one exception: `capability.go` and `warning.go` read the events
+  far enough to tell what a log can carry and what is wrong with it.
 - Every exported identifier has a doc comment; `TestDocComments` (root)
   fails otherwise. Comments are short English sentences.
 - The cookbook in `timeline/README.md` is a verbatim copy of the Example
@@ -100,8 +106,8 @@ the graph. The arcdps reference is
 gofmt -l . && go vet ./... && go test ./...          # always green before finishing
 go test ./timeline -bench . -benchmem                 # reference: ~190 ns and 150 B per event
 go test ./timeline -run XXX -fuzz FuzzEvents -fuzztime 30s   # after touching build.go
-EVTC_REAL_LOGS=1 go test ./timeline -run TestRealLogs -v     # every log under tests_fixtures/: invariants, API smoke, event coverage report
-EVTC_REAL_LOGS=1 go test ./extensions/healingstats -run TestRealLogs -v   # every log with the healing addon: invariants, merge report
+EVTC_REAL_LOGS=1 go test ./timeline -run TestRealLogs -v     # every log under tests_fixtures/, or under EVTC_REAL_LOGS=<folder>: invariants, API smoke, event coverage report
+EVTC_REAL_LOGS=1 go test ./extensions/healingstats -run TestRealLogs -v   # same folders, every log with the healing addon: invariants, merge report
 go test ./extensions/healingstats -run XXX -fuzz FuzzDecode -fuzztime 30s # after touching its build.go
 ```
 
@@ -123,11 +129,23 @@ go test ./extensions/healingstats -run XXX -fuzz FuzzDecode -fuzztime 30s # afte
   the node or field, counts in `scan`, arena in `allocate*`, linking in
   `fill`, invariants, fixture helper, unit test, generator coverage,
   allocation pin if it adds a lookup, README table row and cookbook entry.
+  A kind added by a new arcdps release also gets a `Capability` (a
+  constant and its row of `capabilityTable`), dated by the first build
+  that writes usable data.
 
 ## Format facts that are easy to get wrong
 
-- Logs older than arcdps 20260501 use another encoding; `Build` returns
-  `ErrLegacyLog` for them.
+- Logs older than arcdps 20260501 write casts and buff events as
+  `StateCombat` events. `timeline/legacy.go` gives each event the kind of
+  the typed format, and `scan` and `fill` switch on that kind, never on
+  `e.IsStateChange`. `Build` returns `ErrLegacyLog` below `MinBuild`
+  (20240613), the oldest build `docs/format-history.md` has more than a
+  handful of logs for.
+- What a log holds depends on the build that wrote it. `Log.Has`
+  (`capability.go`) answers from the build date and from what the events
+  prove, so that an empty result can be told from a log that cannot say;
+  `Log.Warnings` (`warning.go`) lists what is known to be wrong with a
+  log, mostly defects the arcdps changelog admits for its release.
 - Events are only nearly sorted; the builder stable-sorts them. Metadata
   kinds (`BUFFINFO`, `SKILLINFO`, `IDTOGUID`, `INTEGRITY`...) carry a
   payload in their time field and are excluded from `tl.Events()`.

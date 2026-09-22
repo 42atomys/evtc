@@ -73,16 +73,22 @@ func (q Effects) At(t time.Duration) Effects { return q.Between(At(t)) }
 
 // By keeps the effects played around e or placed by it.
 func (q Effects) By(e Entity) Effects {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.none() {
 		return q.Where(never[Effect])
 	}
-	return q.Where(func(f *Effect) bool { return f.Agent == a })
+	return q.Where(func(f *Effect) bool { return w.is(f.Agent) })
 }
 
 // OfID keeps the effects with the given content id.
+// ! the ID are relative to the log, use [OfGUID] for cross log query
 func (q Effects) OfID(id uint32) Effects {
 	return q.Where(func(f *Effect) bool { return f.EffectID == id })
+}
+
+// OfGUID keeps the effects wuth the given game GUID.
+func (q Effects) OfGUID(guid GUID) Effects {
+	return q.Where(func(f *Effect) bool { return f.GUID == guid })
 }
 
 // Ground keeps the effects placed on the ground.

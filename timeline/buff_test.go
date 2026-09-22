@@ -23,7 +23,7 @@ func TestStackActivity(t *testing.T) {
 	b.buffRemoveAll(9000, addrP1, 0, skillBurn)
 	b.buffActive(9500, addrP1, 9, 1)
 	tl := mustBuild(t, b.build(10000))
-	p1 := tl.players[0]
+	p1 := tl.characters[0]
 	stacks := p1.Stacks().All()
 	if len(stacks) != 4 {
 		t.Fatalf("stacks = %d", len(stacks))
@@ -66,7 +66,7 @@ func TestStacksEndWithDespawn(t *testing.T) {
 	b.buffRemoveAll(3500, addrP2, 0, skillBuff) // nothing open on p2: ignored
 	b.state(4000, addrP1, evtc.StateDespawn)    // a player leaving takes its stacks away too
 	tl := mustBuild(t, b.build(5000))
-	pet, p1 := tl.Agent(addrPet), tl.players[0]
+	pet, p1 := tl.Agent(addrPet), tl.characters[0]
 	stacks := pet.Stacks().All()
 	if len(stacks) != 3 {
 		t.Fatalf("stacks on the pet = %d", len(stacks))
@@ -138,7 +138,7 @@ func TestEffectiveStacks(t *testing.T) {
 	b.buffApply(1500, addrBoss, addrP2, skillBurn, 5000, 200)
 	b.buffRemoveSingle(2000, addrP2, addrP1, skillBurn, 4500, 200, evtc.BuffRemoveManual)
 	tl := mustBuild(t, b.build(4000))
-	p1, p2 := tl.players[0], tl.players[1]
+	p1, p2 := tl.characters[0], tl.characters[1]
 	might, quick, burn := tl.Buff(skillBuff), tl.Buff(quickness), tl.Buff(skillBurn)
 
 	if might.Stacking != StackingIntensity || might.StackLimit != 25 || !might.IsBoon() || quick.Stacking != StackingQueue || !burn.IsCondition() || burn.IsBoon() {
@@ -215,7 +215,7 @@ func TestBuffStacks(t *testing.T) {
 	b.buffApply(8000, addrP2, addrP2, skillBuff, 5000, 7)
 	tl := mustBuild(t, b.build(10000))
 
-	p1, p2, boss := tl.players[0], tl.players[1], tl.targets[0]
+	p1, p2, boss := tl.characters[0], tl.characters[1], tl.targets[0]
 	if p1.Stacks().Count() != 5 || tl.Stacks().Count() != 6 || p2.StacksApplied().Count() != 5 || p2.Stacks().Count() != 1 {
 		t.Fatalf("stacks = %d total %d", p1.Stacks().Count(), tl.Stacks().Count())
 	}
@@ -286,11 +286,11 @@ func TestDuplicateStackID(t *testing.T) {
 	b.buffRemoveSingle(3000, addrP1, 0, skillBuff, 0, 7, evtc.BuffRemoveSingle)
 	tl := mustBuild(t, b.build(10000))
 
-	stacks := tl.players[0].Stacks().All()
+	stacks := tl.characters[0].Stacks().All()
 	if len(stacks) != 2 || stacks[0].Interval != NewInterval(time.Second, 2*time.Second) || stacks[0].Removal != evtc.BuffRemoveNone || stacks[0].Remove != nil {
 		t.Errorf("reused id: first stack = %+v", stacks[0])
 	}
-	if !stacks[0].Superseded || stacks[0].Open() || stacks[0].Expired() || tl.players[0].Stacks().Open().Count() != 0 {
+	if !stacks[0].Superseded || stacks[0].Open() || stacks[0].Expired() || tl.characters[0].Stacks().Open().Count() != 0 {
 		t.Errorf("superseded stack reports open=%v expired=%v", stacks[0].Open(), stacks[0].Expired())
 	}
 	if stacks[1].Interval != NewInterval(2*time.Second, 3*time.Second) || stacks[1].Remove == nil || stacks[1].Superseded {

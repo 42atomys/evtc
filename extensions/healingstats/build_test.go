@@ -183,7 +183,7 @@ func TestRecorded(t *testing.T) {
 	b = fixture()
 	b.register(0, "2.19rc2", 2)
 	s = mustBuild(t, b.build(1000))
-	if len(s.Recorded) != 1 || s.Recorded[0].Agent != s.Timeline.POV.Agent || s.Heals().Count() != 0 || s.Merged != 0 {
+	if len(s.Recorded) != 1 || s.Recorded[0].Agent != s.Timeline.POV.Ref() || s.Heals().Count() != 0 || s.Merged != 0 {
 		t.Errorf("recorded = %v, heals %d", s.Recorded, s.Heals().Count())
 	}
 	checkInvariants(t, s)
@@ -241,7 +241,7 @@ func TestCredited(t *testing.T) {
 	if want := []time.Duration{500 * time.Millisecond, time.Second, 1500 * time.Millisecond, 2 * time.Second}; len(times) != 4 || times[0] != want[0] || times[1] != want[1] || times[2] != want[2] || times[3] != want[3] {
 		t.Errorf("credited times = %v", times)
 	}
-	if h := s.Heals().First(); h.Src != pet || h.Credited() != alpha || !h.creditedTo(alpha.Agent) || h.creditedTo(bravo.Agent) {
+	if h := s.Heals().First(); h.Src != pet || h.Credited() != alpha || !h.creditedTo(who{one: alpha.Agent}) || h.creditedTo(who{one: bravo.Agent}) {
 		t.Errorf("first heal = %+v credited to %v", h, h.Credited())
 	}
 	if s.Heals().CreditedTo(alpha).Count() != 4 || s.Heals().By(alpha).Count() != 2 || s.Heals().CreditedTo(pet).Count() != 2 {

@@ -45,10 +45,10 @@ func checkInvariants(tb testing.TB, s *Stats) {
 	if s.Unknown == nil || s.Unknown.Agent != tl.Unknown || s.byAgent[tl.Unknown] != s.Unknown || s.Unknown.Stats != s || s.Unknown.Recorded {
 		fail("unknown node is inconsistent: %+v", s.Unknown)
 	}
-	players := tl.Players().All()
+	chars := tl.Characters().All()
 	for i, p := range s.players {
-		if p.Agent != players[i].Agent || s.Agent(players[i]) != p {
-			fail("player %d is %v, want %v", i, p, players[i])
+		if p.Agent != chars[i].Agent || s.Agent(chars[i]) != p {
+			fail("player node %d is %v, want the node of %v", i, p, chars[i])
 		}
 	}
 
@@ -98,7 +98,7 @@ func checkInvariants(tb testing.TB, s *Stats) {
 		if c := h.Cast; c != nil && (c.Caster != h.Src.Agent || c.Skill != h.Skill || c.Interval.Start > h.Time) {
 			fail("heal %d has an inconsistent cast: %+v", i, c)
 		}
-		if cr := h.Credited(); cr == nil || (cr != h.Src && cr.Agent != h.Src.Master) || !h.creditedTo(cr.Agent) {
+		if cr := h.Credited(); cr == nil || (cr != h.Src && cr.Agent != h.Src.Master) || !h.creditedTo(who{one: cr.Agent}) {
 			fail("heal %d is credited to %v", i, cr)
 		}
 		if h.SrcRecorded && h.Src != s.Unknown && !(h.Src.Recorded && h.Credited().Recorded) {
@@ -141,7 +141,7 @@ func checkInvariants(tb testing.TB, s *Stats) {
 			fail("credited heals of %v: %d, want %d", a, len(a.healsCredited), len(a.heals)+n)
 		}
 		for j, h := range a.healsCredited {
-			if !h.creditedTo(a.Agent) || (j > 0 && h.Time < a.healsCredited[j-1].Time) {
+			if !h.creditedTo(who{one: a.Agent}) || (j > 0 && h.Time < a.healsCredited[j-1].Time) {
 				fail("credited heal %d of %v is inconsistent: %+v", j, a, h)
 			}
 		}
@@ -176,7 +176,7 @@ func checkInvariants(tb testing.TB, s *Stats) {
 // address when the agent table declares it, otherwise the agent that
 // carried the instance id at t, otherwise the agent of the address.
 func names(tl *timeline.Timeline, a *timeline.Agent, addr uint64, inst uint16, t time.Duration) bool {
-	byAddr := tl.Agent(addr)
+	byAddr := tl.AgentOf(addr, inst)
 	if byAddr != nil && byAddr != tl.Unknown && byAddr.Raw != nil {
 		return a == byAddr
 	}

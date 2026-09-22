@@ -139,12 +139,3 @@ func (e EliteSpec) String() string {
 // Profession returns the profession the specialization belongs to,
 // ProfessionUnknown for a core build or an unknown id.
 func (e EliteSpec) Profession() Profession { return e.info().prof }
-
-// Spec returns the name of the elite specialization of the player, or the
-// name of the profession for a core build or an unknown specialization.
-func (p *Player) Spec() string {
-	if info := p.EliteSpec.info(); info.name != "" {
-		return info.name
-	}
-	return p.Profession.String()
-}

@@ -14,6 +14,8 @@ import (
 func FuzzBuild(f *testing.F) {
 	f.Add(encodeLog(fixture().build(5000)))
 	f.Add(encodeLog(genLog(genOptions{players: 2, adds: 2, duration: 10 * time.Second, seed: 1})))
+	_, legacy := asLegacy(genLog(genOptions{players: 2, adds: 2, duration: 10 * time.Second, seed: 2}))
+	f.Add(encodeLog(legacy))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		l, err := evtc.Parse(bytes.NewReader(data))
 		if err != nil {
@@ -47,9 +49,12 @@ func FuzzEvents(f *testing.F) {
 	b.health(1000, addrBoss, 90)
 	b.defianceState(1000, addrAdd, DefianceActive)
 	b.minionHit(1500, addrPet, addrBoss, instP1, skillHeat, 50)
+	b.legacyEffect(1200, addrBoss, addrP1, 900, 7, 4000, Vec3{}, [3]int16{}, false)
 	l := b.build(5000)
 	f.Add(encodeEvents(l.Events[1:]))
 	f.Add(encodeEvents(l.Events[len(l.Events)-3:]))
+	_, legacy := asLegacy(l)
+	f.Add(encodeEvents(legacy.Events[1:]))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		data = data[:len(data)-len(data)%64]
@@ -62,5 +67,11 @@ func FuzzEvents(f *testing.F) {
 			return
 		}
 		checkInvariants(t, tl)
+		// Under an older header the same events take the path of the
+		// format before typed events, unless they hold some.
+		l.Header.Build = "20240613"
+		if tl, err = Build(l); err == nil {
+			checkInvariants(t, tl)
+		}
 	})
 }

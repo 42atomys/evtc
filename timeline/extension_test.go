@@ -27,8 +27,8 @@ func TestExtensions(t *testing.T) {
 	if x.Signature != heal || x.Version != "2.18rc1" || x.Time != time.Second || x.Event == nil || x.Events().Count() != 3 || x.Events().First().BuffDamage != -300 || x.Events().Last().BuffDamage != -50 {
 		t.Errorf("extension = %+v, %d events", x, x.Events().Count())
 	}
-	if x.Events().Between(NewInterval(0, 1500*msec)).Count() != 2 || x.Events().Involving(tl.players[1]).Count() != 2 {
-		t.Errorf("extension events between = %d, involving p2 = %d", x.Events().Between(NewInterval(0, 1500*msec)).Count(), x.Events().Involving(tl.players[1]).Count())
+	if x.Events().Between(NewInterval(0, 1500*msec)).Count() != 2 || x.Events().Involving(tl.characters[1]).Count() != 2 {
+		t.Errorf("extension events between = %d, involving p2 = %d", x.Events().Between(NewInterval(0, 1500*msec)).Count(), x.Events().Involving(tl.characters[1]).Count())
 	}
 	if dup := tl.Extensions[1]; dup.Signature != heal || dup.Version != "dup" || dup.Events().Count() != 0 || dup.Time != 2*time.Second {
 		t.Errorf("duplicate registration = %+v", dup)
@@ -39,7 +39,7 @@ func TestExtensions(t *testing.T) {
 	if tl.ExtensionEvents().Count() != 4 || tl.ExtensionEvents().Between(NewInterval(0, 1500*msec)).Count() != 2 {
 		t.Errorf("extension events = %d", tl.ExtensionEvents().Count())
 	}
-	if p1 := tl.players[0]; p1.Events().Of(evtc.StateExtensionCombat).Count() != 4 || tl.Unknown.Events().Of(evtc.StateExtensionCombat).Count() != 1 || tl.Hits().Count() != 0 {
+	if p1 := tl.characters[0]; p1.Events().Of(evtc.StateExtensionCombat).Count() != 4 || tl.Unknown.Events().Of(evtc.StateExtensionCombat).Count() != 1 || tl.Hits().Count() != 0 {
 		t.Errorf("extension events on agents: p1 %d, unknown %d, hits %d", p1.Events().Of(evtc.StateExtensionCombat).Count(), tl.Unknown.Events().Of(evtc.StateExtensionCombat).Count(), tl.Hits().Count())
 	}
 	if tl.Extension(heal) != x || tl.Extension(0xDEAD) != nil || tl.Extension(0x22) != tl.Extensions[3] || tl.ExtensionOf(x.Events().First()) != x || tl.ExtensionOf(nil) != nil || tl.ExtensionOf(tl.Events().First()) != nil {
@@ -48,7 +48,7 @@ func TestExtensions(t *testing.T) {
 	if orphan := tl.ExtensionEvents().Where(func(e *evtc.Event) bool { return extensionSignature(e) == 0xDEAD }).First(); orphan == nil || tl.ExtensionOf(orphan) != nil {
 		t.Errorf("orphan extension event = %+v", orphan)
 	}
-	p1, p2 := tl.players[0], tl.players[1]
+	p1, p2 := tl.characters[0], tl.characters[1]
 	if x.Events().By(p1).Count() != 1 || x.Events().On(p1).Count() != 2 || x.Events().By(p2).Count() != 1 || x.Events().On(p2).Count() != 1 || tl.ExtensionEvents().By(tl.Unknown).Count() != 1 || x.Events().By(nil).Count() != 0 || x.Events().On(nil).Count() != 0 {
 		t.Errorf("by p1 %d, on p1 %d, by p2 %d, on p2 %d, by unknown %d", x.Events().By(p1).Count(), x.Events().On(p1).Count(), x.Events().By(p2).Count(), x.Events().On(p2).Count(), tl.ExtensionEvents().By(tl.Unknown).Count())
 	}

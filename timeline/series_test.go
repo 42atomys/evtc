@@ -64,7 +64,7 @@ func TestNumbersBetween(t *testing.T) {
 	if boss.Health.TimeBelow(50, NewInterval(6*time.Second, 7*time.Second)) != 0 {
 		t.Error("TimeBelow outside the lifetime is not 0")
 	}
-	if tl.players[1].Health.TimeBelow(50, tl.Interval()) != 0 {
+	if tl.characters[1].Health.TimeBelow(50, tl.Interval()) != 0 {
 		t.Error("TimeBelow without samples is not 0")
 	}
 }
@@ -256,6 +256,40 @@ func TestSeriesAndSpansIteration(t *testing.T) {
 	}
 }
 
+// TestTeleportWithoutTarget checks a teleport whose target is zero, as
+// arcdps 20260915 writes them: it is no position sample, and the agent
+// jumps to its next position instead of gliding there.
+func TestTeleportWithoutTarget(t *testing.T) {
+	b := fixture()
+	b.move(1000, addrP1, evtc.StatePosition, 100, 100, 0)
+	b.move(1000, addrP1, evtc.StateTeleport, 0, 0, 0)
+	b.move(1200, addrP1, evtc.StatePosition, 500, 100, 0)
+	b.move(1400, addrP1, evtc.StatePosition, 600, 100, 0)
+	// A teleport with a target clears the pending break: it is the break.
+	b.move(3000, addrP2, evtc.StateTeleport, 0, 0, 0)
+	b.move(3100, addrP2, evtc.StateTeleport, 50, 50, 0)
+	b.move(3300, addrP2, evtc.StatePosition, 60, 50, 0)
+	tl := mustBuild(t, b.build(10000))
+
+	p1, p2 := tl.characters[0], tl.characters[1]
+	samples := p1.Position.Samples()
+	if len(samples) != 3 || samples[0].Break || !samples[1].Break || samples[2].Break {
+		t.Fatalf("samples = %+v", samples)
+	}
+	for _, tt := range []struct {
+		at   time.Duration
+		want Vec3
+	}{{1100 * msec, Vec3{100, 100, 0}}, {1200 * msec, Vec3{500, 100, 0}}, {1300 * msec, Vec3{550, 100, 0}}} {
+		if got := p1.PositionAt(tt.at); got != tt.want {
+			t.Errorf("PositionAt(%v) = %v, want %v", tt.at, got, tt.want)
+		}
+	}
+	if s := p2.Position.Samples(); len(s) != 2 || !s[0].Break || s[1].Break {
+		t.Errorf("samples after the two teleports = %+v", s)
+	}
+	checkInvariants(t, tl)
+}
+
 func TestMovement(t *testing.T) {
 	b := fixture()
 	b.move(1000, addrP1, evtc.StatePosition, 0, 0, 0)
@@ -267,7 +301,7 @@ func TestMovement(t *testing.T) {
 	b.facing(1000, addrP1, 0, 1)
 	tl := mustBuild(t, b.build(10000))
 
-	p1 := tl.players[0]
+	p1 := tl.characters[0]
 	// The point of view event of the fixture opens the lifetime at 0; the
 	// teleport counts as a position sample.
 	if p1.Position.Len() != 5 || p1.Lifetime != NewInterval(0, 5*time.Second) {
@@ -351,16 +385,16 @@ func TestHealth(t *testing.T) {
 	if v, _ := boss.Health.Min(); v != 30 {
 		t.Errorf("Min = %v", v)
 	}
-	if v, ok := tl.players[0].Barrier.At(3 * time.Second); !ok || v != 25.5 {
+	if v, ok := tl.characters[0].Barrier.At(3 * time.Second); !ok || v != 25.5 {
 		t.Errorf("Barrier = %v, %v", v, ok)
 	}
-	if v, ok := tl.players[0].Barrier.At(2500 * msec); !ok || v != 25.5 {
+	if v, ok := tl.characters[0].Barrier.At(2500 * msec); !ok || v != 25.5 {
 		t.Errorf("Barrier at its only sample = %v, %v", v, ok)
 	}
-	if v, ok := tl.players[0].Barrier.At(time.Second); !ok || v != 25.5 {
+	if v, ok := tl.characters[0].Barrier.At(time.Second); !ok || v != 25.5 {
 		t.Errorf("Barrier held before its first sample = %v, %v", v, ok)
 	}
-	if _, ok := tl.players[0].Barrier.At(6 * time.Second); ok {
+	if _, ok := tl.characters[0].Barrier.At(6 * time.Second); ok {
 		t.Error("Barrier after the lifetime succeeded")
 	}
 }

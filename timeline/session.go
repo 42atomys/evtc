@@ -78,19 +78,34 @@ func (g GUID) IsZero() bool { return g == GUID{} }
 func (g GUID) String() string { return strings.ToUpper(hex.EncodeToString(g[:])) }
 
 // ContentKind is the kind of content an id to GUID association describes,
-// with the values of arcdps.
+// with the values arcdps writes. Its README leaves the team out and gives
+// emotes 4 and transformations 5; in the logs a transformation is 6. Teams
+// are in the logs of arcdps 20260226 to 20260604, emotes in those of
+// 20260414 to 20260604.
 type ContentKind uint8
 
 const (
-	ContentEffect         ContentKind = iota // An effect id.
-	ContentMarker                            // A marker id.
-	ContentSkill                             // A skill id.
-	ContentSpecies                           // A species id.
-	ContentEmote                             // An emote id.
-	ContentTransformation                    // A transformation id.
+	// ContentEffect is an effect id.
+	ContentEffect ContentKind = iota
+	// ContentMarker is a marker id.
+	ContentMarker
+	// ContentSkill is a skill id.
+	ContentSkill
+	// ContentSpecies is a species id.
+	ContentSpecies
+	// ContentTeam is a team id.
+	//
+	// Deprecated: arcdps 20260701 stopped writing it.
+	ContentTeam
+	// ContentEmote is an emote id.
+	//
+	// Deprecated: arcdps 20260701 stopped writing it.
+	ContentEmote
+	// ContentTransformation is a transformation id.
+	ContentTransformation
 )
 
-var contentNames = []string{"Effect", "Marker", "Skill", "Species", "Emote", "Transformation"}
+var contentNames = []string{"Effect", "Marker", "Skill", "Species", "Team", "Emote", "Transformation"}
 
 // String returns the kind name.
 func (k ContentKind) String() string { return enumString(contentNames, "ContentKind", int(k)) }

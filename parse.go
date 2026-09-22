@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"weak"
 )
 
 const (
@@ -134,6 +135,8 @@ func decode(data []byte) (*Log, error) {
 		return nil, fmt.Errorf("evtc: truncated log: %d trailing bytes after last event", rest)
 	}
 	l.Events = decodeEvents(events)
+
+	l.seen = &observation{owner: weak.Make(l)}
 
 	return l, nil
 }

@@ -106,20 +106,20 @@ func (q Stacks) At(t time.Duration) Stacks { return q.Between(At(t)) }
 
 // On keeps the stacks carried by e.
 func (q Stacks) On(e Entity) Stacks {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.none() {
 		return q.Where(never[BuffStack])
 	}
-	return q.Where(func(s *BuffStack) bool { return s.Receiver == a })
+	return q.Where(func(s *BuffStack) bool { return w.is(s.Receiver) })
 }
 
 // By keeps the stacks applied by e.
 func (q Stacks) By(e Entity) Stacks {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.none() {
 		return q.Where(never[BuffStack])
 	}
-	return q.Where(func(s *BuffStack) bool { return s.Applier == a })
+	return q.Where(func(s *BuffStack) bool { return w.is(s.Applier) })
 }
 
 // OfBuff keeps the stacks of the buff id.
@@ -211,11 +211,11 @@ func (q Stacks) Average(iv Interval) float64 {
 // RemovedBy keeps the stacks whose removal names e: the stacks e cleansed
 // or stripped, and those it removed from itself.
 func (q Stacks) RemovedBy(e Entity) Stacks {
-	a := ref(e)
-	if a == nil {
+	w := agentsOf(e)
+	if w.none() {
 		return q.Where(never[BuffStack])
 	}
-	return q.Where(func(s *BuffStack) bool { return s.RemovedBy == a })
+	return q.Where(func(s *BuffStack) bool { return w.is(s.RemovedBy) })
 }
 
 // EffectiveAt returns the number of stacks in effect at t as the game

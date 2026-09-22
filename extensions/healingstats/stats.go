@@ -51,7 +51,8 @@ type Stats struct {
 	// merged into one heal.
 	Merged int
 
-	agents  []*Agent
+	agents []*Agent
+	// players are the nodes of the characters of the players.
 	players []*Agent
 	heals   []*Heal
 	byAgent map[*timeline.Agent]*Agent
@@ -101,8 +102,8 @@ func (s *Stats) Agents() Agents {
 	return Agents{timeline.From(s.agents)}
 }
 
-// Players returns the nodes of the players, in the order of
-// Timeline.Players.
+// Players returns the nodes of the characters of the players, in the
+// order of Timeline.Characters.
 func (s *Stats) Players() Agents {
 	if s == nil {
 		return Agents{}
@@ -111,12 +112,45 @@ func (s *Stats) Players() Agents {
 }
 
 // Agent returns the node of an agent of the timeline, nil for a nil
-// entity or an agent of another timeline.
+// entity or an agent of another timeline. A player stands for their main
+// character.
 func (s *Stats) Agent(e timeline.Entity) *Agent {
 	if s == nil {
 		return nil
 	}
 	return s.byAgent[ref(e)]
+}
+
+// who is the set of timeline agents an entity stands for: one agent, or
+// the agents of the characters of a player who brought several.
+type who struct {
+	one  *timeline.Agent
+	more []*timeline.Character
+}
+
+// agentsOf returns the agents behind an entity.
+func agentsOf(e timeline.Entity) who {
+	w := who{one: ref(e)}
+	if p, ok := e.(*timeline.Player); ok && p != nil && len(p.Characters()) > 1 {
+		w.more = p.Characters()
+	}
+	return w
+}
+
+// is reports whether a is one of the agents.
+func (w who) is(a *timeline.Agent) bool {
+	if a == nil {
+		return false
+	}
+	if a == w.one {
+		return true
+	}
+	for _, c := range w.more {
+		if c.Agent == a {
+			return true
+		}
+	}
+	return false
 }
 
 // ref returns the timeline agent of an entity, nil for a nil entity.

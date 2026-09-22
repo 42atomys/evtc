@@ -14,14 +14,14 @@ func TestHitFlags(t *testing.T) {
 	}
 	b.add(evtc.Event{Time: b.at(2000), SrcAgent: addrP1, DstAgent: addrP2, SkillID: skillHeat, Value: 1, IFF: evtc.IFFFriend})
 	tl := mustBuild(t, b.build(10000))
-	hits := tl.players[0].Hits().All()
+	hits := tl.characters[0].Hits().All()
 	for i, want := range []struct{ src, dst bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
 		if h := hits[i]; h.Moving != want.src || h.TargetMoving != want.dst || !h.OverNinety || h.TargetDowned != (i%2 == 1) {
 			t.Errorf("hit %d flags = %+v", i, h)
 		}
 	}
-	q := tl.players[0].Hits()
-	if q.Foes().Count() != 4 || q.Friends().Count() != 1 || q.Friends().First().Dst != tl.players[1].Agent {
+	q := tl.characters[0].Hits()
+	if q.Foes().Count() != 4 || q.Friends().Count() != 1 || q.Friends().First().Dst != tl.characters[1].Agent {
 		t.Errorf("Foes = %d Friends = %d", q.Foes().Count(), q.Friends().Count())
 	}
 }
@@ -35,7 +35,7 @@ func TestHitsAggregates(t *testing.T) {
 	b.add(evtc.Event{Time: b.at(2500), SrcAgent: addrP1, DstAgent: addrBoss, SkillID: skillBurn, BuffDamage: 20, OverstackValue: 20, IsShields: 1, Buff: 1, Result: evtc.ResultBuffDamageCycle})
 	b.add(evtc.Event{Time: b.at(2600), SrcAgent: addrP1, DstAgent: addrBoss, SkillID: skillSlam, Value: 10, OverstackValue: 99, IFF: evtc.IFFFoe})
 	tl := mustBuild(t, b.build(10000))
-	hits := tl.players[0].Hits()
+	hits := tl.characters[0].Hits()
 
 	if hits.Damage() != 180 || hits.Barrier() != 50 || hits.HealthDamage() != 130 || hits.Between(At(time.Second)).Barrier() != 0 {
 		t.Errorf("Damage = %d Barrier = %d HealthDamage = %d", hits.Damage(), hits.Barrier(), hits.HealthDamage())
@@ -71,7 +71,7 @@ func TestPerAgent(t *testing.T) {
 	b.hit(1300, 0, addrBoss, skillSlam, 300, evtc.ResultStrikeDamageNormal)
 	b.hit(1400, addrBoss, addrP1, skillSlam, 500, evtc.ResultStrikeDamageNormal)
 	tl := mustBuild(t, b.build(10000))
-	p1, p2, boss, pet := tl.players[0], tl.players[1], tl.targets[0], tl.Agent(addrPet)
+	p1, p2, boss, pet := tl.characters[0], tl.characters[1], tl.targets[0], tl.Agent(addrPet)
 
 	shares := boss.HitsTaken().PerAgent()
 	want := []struct {
@@ -129,7 +129,7 @@ func TestRankingsAndCredited(t *testing.T) {
 	b.hit(1400, addrBoss, addrP1, skillSlam, 500, evtc.ResultStrikeDamageNormal)
 	b.minionHit(1500, addrPet, addrAdd, instP1, skillHeat, 50)
 	tl := mustBuild(t, b.build(10000))
-	p1, p2, boss, pet, add := tl.players[0], tl.players[1], tl.targets[0], tl.Agent(addrPet), tl.Agent(addrAdd)
+	p1, p2, boss, pet, add := tl.characters[0], tl.characters[1], tl.targets[0], tl.Agent(addrPet), tl.Agent(addrAdd)
 
 	credited := p1.HitsCredited()
 	if credited.Count() != 3 || credited.First().Time != time.Second || credited.Last().Time != 1500*msec || credited.On(boss).Damage() != 350 || p1.Hits().Count() != 1 {
@@ -170,7 +170,7 @@ func TestHitFilters(t *testing.T) {
 	b.hit(3000, addrP1, addrBoss, skillSlam, 100, evtc.ResultStrikeDamageNormal)
 	tl := mustBuild(t, b.build(10000))
 
-	p1 := tl.players[0]
+	p1 := tl.characters[0]
 	if !p1.IsPlayer() || p1.IsNPC() || p1.IsGadget() {
 		t.Error("kind predicates are wrong")
 	}
