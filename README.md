@@ -13,7 +13,7 @@ go get github.com/42atomys/evtc@latest
 
 | Package | Purpose |
 | --- | --- |
-| `github.com/42atomys/evtc` (`evtc`) | Decodes `.evtc` and `.zevtc` files into their header, agent table, skill table and raw events, without interpretation beyond what a log can carry (`Has`) and what is wrong with it (`Warnings`). |
+| `github.com/42atomys/evtc` (`evtc`) | Decodes `.evtc` and `.zevtc` files into their header, agent table, skill table and raw events, without interpretation beyond what a log can carry (`Has`) and what is wrong with it (`Warnings`), and writes a log back in a file (`WriteFile`). |
 | `github.com/42atomys/evtc/timeline` | Builds a temporal graph over a decoded log and lets you query it by time: positions, health, casts, hits, buffs, downs, breakbars. See [timeline/README.md](timeline/README.md). |
 | `github.com/42atomys/evtc/extensions/healingstats` | Decodes the events of the healing stats addon into heals and barrier linked to the timeline; importing it is enough. See [extensions/healingstats/README.md](extensions/healingstats/README.md). |
 | `cmd/evtcparser` | Prints the header and table sizes of a log: `go run ./cmd/evtcparser fight.zevtc`. |
