@@ -603,7 +603,7 @@ log under `tests_fixtures/`, or under the folder the variable names
 instead of 1 (relative to the repository root, or absolute), checks the
 invariants, runs the API on each, checks a log of arcdps 20260501 or
 later builds the same graph once written the older way, and reports how
-much of every log the graph consumes. Over 10,548 logs of raids, strikes,
+much of every log the graph consumes. Over 10,565 logs of raids, strikes,
 fractals, convergences and training golems (1.57 billion events), 78.6%
 of the events are held by a node or read into a field. Most of the rest,
 19% of the events, are the barrier updates arcdps wrote until 20260701
@@ -631,7 +631,8 @@ accepts them.
 
 ## Not modeled
 
-Capture points (`GADGETCAPTURE*`), gadget models (`GADGETMODELINFO`), WvW
-objectives and the retired `RATEHEALTH` are only available as raw events.
-The graph does not guess which player a boss is chasing: the log carries no
-aggro information.
+Capture points (`GADGETCAPTURE*`), gadget models (`GADGETMODELINFO`),
+fly-to flights (`FLYTO`), WvW teams and objectives (`WVWTEAMS`,
+`WVWOBJECTIVESTATUS`) and the retired `RATEHEALTH` are only available as
+raw events. The graph does not guess which player a boss is chasing: the
+log carries no aggro information.

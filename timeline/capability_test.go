@@ -33,7 +33,7 @@ func TestHasByProof(t *testing.T) {
 		t.Errorf("capabilities = %v", tl.Capabilities())
 	}
 	// The fixture holds no GUID event.
-	if want := []evtc.Capability{evtc.CapabilityGUIDs, evtc.CapabilityGadgetModels}; !slices.Equal(tl.Missing(), want) {
+	if want := []evtc.Capability{evtc.CapabilityGUIDs, evtc.CapabilityGadgetModels, evtc.CapabilityFlyTo}; !slices.Equal(tl.Missing(), want) {
 		t.Errorf("Missing = %v, want %v", tl.Missing(), want)
 	}
 }

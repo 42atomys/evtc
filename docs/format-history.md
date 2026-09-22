@@ -16,8 +16,8 @@ is a value of `is_statechange`. A number in parentheses after a name is
 its value in its enum, which is `cbtstatechange` for a kind. G0 to G3 are
 the [generations](#generations) of the format.
 
-The header of a log carries the build date. Of the 48 builds of the [logs
-measured](#logs), 41 are dated a release day, 2 the day after (20250730,
+The header of a log carries the build date. Of the 49 builds of the [logs
+measured](#logs), 42 are dated a release day, 2 the day after (20250730,
 20260709), and 5 have no changelog entry on either day (20250907,
 20250925, 20251122, 20260416, 20260718). The README dates a retirement by
 a build a few days to two weeks older than the matching release (see
@@ -48,11 +48,12 @@ The main page keeps only its latest changelog entries, so the history is
 the union of all versions: about 2470 entries, about 330 of them naming
 evtc, over 511 release days (`changelog_all.tsv` has a few more rows, for
 entries reworded between two captures). The live `README.txt` and
-`writeencounter.cpp`, fetched on 2026-09-21, cover the days after the
-last capture: the README differs from it by four `realtime:` annotations,
-and the live writer has an edit of 2025-08-19 that no capture holds
-(`addr` renamed `iid`, stats `int16_t` again after the `uint16_t`
-captured in 2022).
+`writeencounter.cpp`, fetched on 2026-09-21, and the live changelog, read
+on 2026-09-22, cover the days after the last capture: the changelog adds
+the release of 2026-09-20, the README differs from its capture by four
+`realtime:` annotations, and the live writer has an edit of 2025-08-19
+that no capture holds (`addr` renamed `iid`, stats `int16_t` again after
+the `uint16_t` captured in 2022).
 
 Everything is kept under `tmp/arcdps-history/`, which git ignores:
 
@@ -70,16 +71,16 @@ Everything is kept under `tmp/arcdps-history/`, which git ignores:
 
 ### Logs
 
-The measurements of this document come from 10,556 boss and map logs of
-48 builds, 20230114 to 20260915, all revision 1: 4,891 of G2, from 36
-builds up to 20260416, and 5,665 of G3, from 12 builds starting with
+The measurements of this document come from 10,573 boss and map logs of
+49 builds, 20230114 to 20260920, all revision 1: 4,891 of G2, from 36
+builds up to 20260416, and 5,682 of G3, from 13 builds starting with
 20260507. They hold nothing older, nothing between 20230114 and 20240613
 and nothing between 20240723 and 20250708. "Measured" means counted on
 them build by build: the kinds a build writes, the fields of a kind that
 are ever non-zero, the values of the byte fields. The logs are kept out
 of git under `tmp/zevtc-fixtures/`, and
 `EVTC_REAL_LOGS=tmp/zevtc-fixtures go test ./timeline -run TestRealLogs`
-parses them all and builds those from 20240613 on: 10,548 logs, 1.57
+parses them all and builds those from 20240613 on: 10,565 logs, 1.57
 billion events, no invariant failing. The same test writes each G3 log
 the G2 way and checks it builds the same graph.
 
@@ -600,6 +601,7 @@ that the current one is written again.
 | 66       | `EARLYEXIT`                                                                          |                                                                                                                 | [2025-08-27 to 2025-08-29]                    | internal; the changelog only mentions its revert on 2025-08-29                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | 67 to 75 | `ANIMATIONSTART` to `WVWOBJECTIVESTATUS`                                             |                                                                                                                 | 2026-05-07                                    | G3. `WVWOBJECTIVESTATUS` upgrade progress at `pad61` to `pad64` from 2026-06-02; `TRANSFORMATION` gains `value`, `is_shields` and `is_offcycle` in the README of 2026-08; `WVWTEAMS` at the end of the log from 2026-09-15                                                                                                                                                                                                                                                                                   |
 | 76 to 87 | `STEALTHCHANGE` to `GADGETMODELINFO`                                                 |                                                                                                                 | 2026-06-02 to 2026-09-15                      | G3. `JUMP` (86) was never written before 2026-09-15. Measured on the 48 logs of build 20260915: jumps in 40, a ping of 16 to 262 in every `TICK` (84), where every earlier build writes 0, `GADGETMODELINFO` (87) in all, and half of the `TELEPORT` events (85) without a target, against 9 out of 68,096 in build 20260816                                                                                                                                                                                 |
+| 88       | `FLYTO`                                                                              |                                                                                                                 | 2026-09-20                                    | G3. The README of 2026-09 still omits the kind the changelog announces. Measured on the 17 logs of build 20260920: 1,150 events, `src_agent` always an agent of the table, `dst_agent` the destination as three int16 of the game coordinate divided by ten then a fourth int16 from 20 to 260 (usually 100), `is_flanking` 1 on the start and 0 on the landing about 880 ms later, every other field zero                                                                                                   |
 
 From 2024-06-12 the kinds the README marks "limited to agent table" are
 written for every agent of the table in every mode. Before, positions,
@@ -1127,8 +1129,8 @@ slightly older than a release can already behave the new way.
 - A `TELEPORT` without a target is no position sample: it breaks the next
   one.
 - `ENTERCOMBAT` without profession is tolerated.
-- The 10,548 logs measured from build 20240613 on build without an
-  invariant failing, and each of the 5,665 G3 ones builds the same graph
+- The 10,565 logs measured from build 20240613 on build without an
+  invariant failing, and each of the 5,682 G3 ones builds the same graph
   once written the G2 way. The 8 logs of build 20230114 are refused.
 
 Nothing above needs an exported identifier to go or change type. Kind
@@ -1251,7 +1253,7 @@ older GUIDs are defective, and map logs hold none before 2025-08-27. When
 The first build is the first one that writes usable data, not the release
 of the kind: `JUMP` (86) was released on 2026-08-11 and never written
 before 2026-09-15. The logs measured follow the changelog release by
-release: over the 48 builds no capability is proved by a log older than
+release: over the 49 builds no capability is proved by a log older than
 its first build, and each capability that events can prove is proved from
 that build on, `RULESET` (52) aside, which no log measured holds. Build
 20260507 lacks stealth, gadget animations and names, missile effects,
@@ -1298,7 +1300,7 @@ each warning has a code a program can test. It does not repeat the
   release of 2026-07-01, fixed the next day, writes a table of one row,
   and no buff or skill definition.
 
-On the 10,556 logs measured, the hitbox warning fires on the 78 logs of
+On the 10,573 logs measured, the hitbox warning fires on the 78 logs of
 build 20240613, the skill one on the 37 of build 20260701, and nothing
 else does. At the floor of 20240613 the G2 typing leaves one thing
 unread, the target of a cast, which `CapabilityTypedEvents` tells. A

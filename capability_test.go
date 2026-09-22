@@ -152,7 +152,7 @@ func TestCapabilitiesAndMissing(t *testing.T) {
 	l := logOf("20260816")
 	has, missing := l.Capabilities(), l.Missing()
 	// GUIDs need their kind, whatever the build.
-	want := []Capability{CapabilityGUIDs, CapabilityJumps, CapabilityPing, CapabilityGadgetModels}
+	want := []Capability{CapabilityGUIDs, CapabilityJumps, CapabilityPing, CapabilityGadgetModels, CapabilityFlyTo}
 	if !slices.Equal(missing, want) {
 		t.Errorf("Missing = %v, want %v", missing, want)
 	}
@@ -219,8 +219,8 @@ func TestHasConcurrent(t *testing.T) {
 }
 
 // TestCapabilitiesSample pins the capabilities of the real log kept in
-// tests_fixtures/ when present: arcdps 20260816 wrote no jump, no ping and
-// no gadget model yet.
+// tests_fixtures/ when present: arcdps 20260816 wrote no jump, no ping, no
+// gadget model and no fly-to flight yet.
 func TestCapabilitiesSample(t *testing.T) {
 	const path = "tests_fixtures/sabetha-05-fd9b6f3a.zevtc"
 	if _, err := os.Stat(path); err != nil {
@@ -230,7 +230,7 @@ func TestCapabilitiesSample(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []Capability{CapabilityJumps, CapabilityPing, CapabilityGadgetModels}; !slices.Equal(l.Missing(), want) {
+	if want := []Capability{CapabilityJumps, CapabilityPing, CapabilityGadgetModels, CapabilityFlyTo}; !slices.Equal(l.Missing(), want) {
 		t.Errorf("Missing = %v, want %v", l.Missing(), want)
 	}
 }

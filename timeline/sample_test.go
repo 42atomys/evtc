@@ -34,10 +34,10 @@ func loadSample(tb testing.TB) *Timeline {
 }
 
 // TestSampleCapabilities pins what arcdps 20260816 could not write yet:
-// Airborne and Ping are empty on this log for lack of data.
+// jumps, the ping in StateTick, gadget models and fly-to flights.
 func TestSampleCapabilities(t *testing.T) {
 	tl := loadSample(t)
-	want := []evtc.Capability{evtc.CapabilityJumps, evtc.CapabilityPing, evtc.CapabilityGadgetModels}
+	want := []evtc.Capability{evtc.CapabilityJumps, evtc.CapabilityPing, evtc.CapabilityGadgetModels, evtc.CapabilityFlyTo}
 	if !slices.Equal(tl.Missing(), want) || len(tl.Warnings()) != 0 {
 		t.Errorf("missing = %v, warnings = %v", tl.Missing(), tl.Warnings())
 	}

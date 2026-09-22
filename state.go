@@ -355,6 +355,15 @@ const (
 	// is_flanking: hide bit (set by gadgets such as the Cardinal Adina
 	// pillars).
 	StateGadgetModelInfo
+	// StateFlyTo when a skill flies an agent to a location, the nova
+	// launch for one. A flight is a pair of events: the start carries the
+	// destination and is_flanking 1, the landing dst_agent 0 and
+	// is_flanking 0, about 880 ms later. The arcdps README does not list
+	// the kind, so the fields are measured on the logs of build 20260920.
+	// src_agent: agent, dst_agent: int16[3] x/y/z of the destination as
+	// the game coordinate divided by 10, then a fourth int16 from 20 to
+	// 260 (usually 100).
+	StateFlyTo
 	// StateUnknown is any type newer than this list.
 	StateUnknown
 )
@@ -448,6 +457,7 @@ var stateChangeNames = []string{
 	StateTeleport:                  "Teleport",
 	StateJump:                      "Jump",
 	StateGadgetModelInfo:           "GadgetModelInfo",
+	StateFlyTo:                     "FlyTo",
 	StateUnknown:                   "Unknown",
 }
 
