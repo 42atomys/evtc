@@ -151,3 +151,134 @@ func (r rule) with(s slot, value func(*evtc.Event) state) rule {
 	r.slot, r.value = s, value
 	return r
 }
+
+// rules holds the treatment of every kind of the typed format. A kind that
+// is missing is one a later arcdps added: the first recording keeps its
+// own, as for what a client writes about its recording.
+var rules = map[evtc.StateChange]rule{
+	evtc.StatePointOfView:   {class: classRecording, src: true},
+	evtc.StateLanguage:      {class: classRecording},
+	evtc.StateGWBuild:       {class: classRecording},
+	evtc.StateShardID:       {class: classRecording},
+	evtc.StateMapID:         {class: classRecording},
+	evtc.StateInstanceStart: {class: classRecording},
+	evtc.StateFractalScale:  {class: classRecording},
+	evtc.StateRuleset:       {class: classRecording},
+	evtc.StateWvWTeams:      {class: classRecording},
+	evtc.StateArcBuild:      {class: classRecording},
+	evtc.StateIntegrity:     {class: classRecording},
+
+	evtc.StateTick:                   {class: classLocal},
+	evtc.StateMapChange:              {class: classLocal},
+	evtc.StateRateHealth:             {class: classLocal},
+	evtc.StateStatResetDefunc:        {class: classLocal},
+	evtc.StateReplInfo:               {class: classLocal},
+	evtc.StateIdleEvent:              {class: classLocal},
+	evtc.StateEarlyExit:              {class: classLocal},
+	evtc.StateAPIDelayedDefunc:       {class: classLocal},
+	evtc.StateEffect1Defunc:          {class: classLocal},
+	evtc.StateLast90BeforeDownDefunc: {class: classLocal, src: true},
+
+	// The target of the log changes for every client of the squad.
+	evtc.StateLogNPCUpdate:     {class: classFight, dst: true},
+	evtc.StateSquadCombatStart: {class: classFight},
+	evtc.StateSquadCombatEnd:   {class: classFight},
+	evtc.StateIIDChange:        {class: classDropped},
+
+	evtc.StateBuffInfo:    {class: classDefinition},
+	evtc.StateBuffFormula: {class: classDefinition},
+	evtc.StateSkillInfo:   {class: classDefinition},
+	evtc.StateSkillTiming: {class: classDefinition},
+	evtc.StateIDToGUID:    {class: classDefinition},
+
+	evtc.StateExtension:       {class: classExtension},
+	evtc.StateExtensionCombat: {class: classExtension, src: true, dst: true},
+
+	evtc.StateSpawn:   {class: classBound, src: true, keySrc: true, key: noPayload},
+	evtc.StateDespawn: {class: classBound, src: true, keySrc: true, key: noPayload},
+
+	// A strike is named by its agents, its skill and what it did;
+	// StateCombat with a buff is a tick, see ruleOf.
+	evtc.StateCombat: server(true, true, true, true, true, func(e *evtc.Event) payload {
+		return payload{u32(e.Value), u32(e.BuffDamage), uint64(e.OverstackValue)<<8 | uint64(e.Result)}
+	}),
+	evtc.StateEnterCombat: server(true, false, false, true, false, noPayload).with(slotCombat, constant(1)),
+	evtc.StateExitCombat:  server(true, false, false, true, false, noPayload).with(slotCombat, constant(0)),
+	evtc.StateChangeUp:    server(true, false, false, true, false, noPayload).with(slotLife, constant(1)),
+	evtc.StateChangeDown:  server(true, false, false, true, false, noPayload).with(slotLife, constant(2)),
+	evtc.StateChangeDead:  server(true, false, false, true, false, noPayload).with(slotLife, constant(3)),
+	evtc.StateWeaponSwap:  server(true, false, false, true, false, byDst).with(slotWeaponSet, valDst),
+	// A stack is named by its receiver, its buff and its id. An initial
+	// stack and an application are the same opening, see gather.
+	evtc.StateBuffInitial:      server(false, true, true, true, true, byTrackable),
+	evtc.StateBuffApply:        server(false, true, true, true, true, byTrackable),
+	evtc.StateBuffRemoveSingle: server(true, false, true, true, true, byTrackable),
+	evtc.StateBuffRemoveAll:    server(true, false, true, true, true, noPayload),
+	evtc.StateBuffActive:       server(true, false, false, true, false, byDst),
+	evtc.StateBuffDeactive:     server(true, false, false, true, false, byTrackable),
+	evtc.StateBuffChange: server(false, true, true, false, true, func(e *evtc.Event) payload {
+		return payload{trackable(e), u32(e.Value)}
+	}),
+	evtc.StateAnimationStart: server(true, true, true, true, true, noPayload),
+	evtc.StateAnimationStop:  server(true, false, true, true, false, noPayload),
+	evtc.StateMissileCreate:  server(true, false, true, true, false, byTrackable),
+	evtc.StateMissileLaunch: server(true, false, true, true, true, func(e *evtc.Event) payload {
+		// The target is x, y in value and z in the low half of
+		// buff_dmg; the rest is where the client saw the missile.
+		return payload{trackable(e), u32(e.Value), u32(e.BuffDamage) & 0xFFFF}
+	}),
+	evtc.StateMissileRemove: server(true, false, true, true, false, byTrackable),
+	evtc.StateMissileEffect: server(false, true, true, false, true, byTrackable),
+	evtc.StateEffectGroundCreate: server(true, false, true, true, false, func(e *evtc.Event) payload {
+		return payload{trackable(e), e.DstAgent}
+	}),
+	evtc.StateEffectGroundRemove: server(false, false, false, false, false, byTrackable),
+	evtc.StateEffectAgentCreate:  server(true, false, true, true, true, byTrackable),
+	evtc.StateEffectAgentRemove:  server(true, false, false, true, false, byTrackable),
+	evtc.StateEffect2Defunc: server(true, false, true, true, false, func(e *evtc.Event) payload {
+		return payload{legacyTrackable(e)}
+	}),
+	evtc.StateTeleport:        server(true, false, false, true, false, byDstValue),
+	evtc.StateJump:            server(true, false, false, true, false, byDst),
+	evtc.StateFlyTo:           server(true, false, false, true, false, byDst),
+	evtc.StateTransformation:  server(true, false, true, true, false, noPayload).with(slotTransformation, valSkill),
+	evtc.StateGlider:          server(true, false, false, true, false, byValue).with(slotGlider, valValue),
+	evtc.StateStunBreak:       server(true, false, false, true, false, noPayload),
+	evtc.StateGadgetAnimation: server(true, false, false, true, false, byDst),
+	evtc.StateGuild:           server(true, false, false, true, false, byDstValue).with(slotGuild, whole),
+	evtc.StateAttackTarget:    server(true, true, false, true, true, noPayload),
+	evtc.StateSquadMarkerGround: server(false, false, true, false, false, func(e *evtc.Event) payload {
+		return payload{e.SrcAgent, e.DstAgent}
+	}),
+	evtc.StateWvWObjectiveStatus: server(false, false, true, false, false, func(e *evtc.Event) payload {
+		return payload{u32(e.Value), u32(e.BuffDamage), uint64(e.Buff)}
+	}),
+	// A reward is named by its id and its type. The clients that get it
+	// are told at once; a client may get one the others do not.
+	evtc.StateReward: server(false, false, false, false, false, byDstValue),
+
+	evtc.StateHealthPctUpdate:  client(slotHealth, whole),
+	evtc.StateBarrierPctUpdate: client(slotBarrier, whole),
+	evtc.StateMaxHealthUpdate:  client(slotMaxHealth, whole),
+	// A movement sample anchors the interpolation: one that repeats the
+	// last value is a repetition only when it follows it at once.
+	evtc.StatePosition:           client(slotPosition, whole),
+	evtc.StateVelocity:           client(slotVelocity, whole),
+	evtc.StateFacing:             client(slotFacing, whole),
+	evtc.StateTeamChange:         client(slotTeam, valDst),
+	evtc.StateTargetable:         client(slotTargetable, whole),
+	evtc.StateStealthChange:      client(slotStealth, whole),
+	evtc.StateGadgetName:         client(slotNameVisible, whole),
+	evtc.StateDefianceBarState:   client(slotDefiance, whole),
+	evtc.StateDefianceBarPercent: client(slotDefiancePercent, whole),
+	// A marker is its id and whether it is a commander tag; id 0 takes
+	// every marker off.
+	evtc.StateMarker: client(slotMarker, func(e *evtc.Event) state {
+		return state{u32(e.Value), uint64(e.Buff)}
+	}),
+	evtc.StateGadgetModelInfo:           client(slotModel, whole),
+	evtc.StateGadgetCaptureOutlineShow:  client(slotNone, nil),
+	evtc.StateGadgetCaptureSplitPercent: client(slotNone, nil),
+	evtc.StateGadgetCaptureOutlineHide:  client(slotNone, nil),
+	evtc.StateGadgetCaptureOutlinePoint: client(slotNone, nil),
+}
