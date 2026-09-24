@@ -282,3 +282,103 @@ var rules = map[evtc.StateChange]rule{
 	evtc.StateGadgetCaptureOutlineHide:  client(slotNone, nil),
 	evtc.StateGadgetCaptureOutlinePoint: client(slotNone, nil),
 }
+
+// tick is the rule of a buff damage tick: arcdps estimates most of them,
+// so they follow the recording that holds the target.
+var tick = rule{class: classClient, src: true, dst: true}
+
+// The rules of the kinds the older format writes another way.
+var (
+	// A cast start keeps something else than its target in dst_agent.
+	legacyAnimationStart = server(true, false, true, true, false, noPayload)
+	// A duration change names the agent that extended the stack.
+	legacyBuffChange = server(false, true, true, true, true, func(e *evtc.Event) payload {
+		return payload{trackable(e), u32(e.Value)}
+	})
+	// An effect plays at the agent of dst_agent when it names one.
+	legacyEffectOnAgent = server(true, true, true, true, true, func(e *evtc.Event) payload {
+		return payload{legacyTrackable(e)}
+	})
+)
+
+// leave is the rule of a team change to no team: what a client writes when
+// it stops holding an agent, as a despawn is, and for every agent it holds
+// when the log ends.
+var leave = rule{class: classBound, src: true, keySrc: true, key: noPayload}
+
+// kindOf returns the kind of an event in the typed format. Before arcdps
+// 20260501 a cast and a buff event are StateCombat events told apart by
+// their other fields, as the timeline reads them.
+func kindOf(e *evtc.Event, typed bool) evtc.StateChange {
+	if typed || e.IsStateChange != evtc.StateCombat {
+		return e.IsStateChange
+	}
+	switch {
+	case e.IsActivation == evtc.ActivationStartDefunc || e.IsActivation == evtc.ActivationQuicknessDefunc:
+		return evtc.StateAnimationStart
+	case e.IsActivation != evtc.ActivationNone:
+		return evtc.StateAnimationStop
+	case e.IsBuffRemove == evtc.BuffRemoveAll:
+		return evtc.StateBuffRemoveAll
+	case e.IsBuffRemove != evtc.BuffRemoveNone:
+		return evtc.StateBuffRemoveSingle
+	case e.Buff != 0 && e.BuffDamage == 0 && e.Value != 0 && e.IsOffcycle != 0:
+		return evtc.StateBuffChange
+	case e.Buff != 0 && e.BuffDamage == 0 && e.Value != 0:
+		return evtc.StateBuffApply
+	}
+	return evtc.StateCombat
+}
+
+// isLeave reports whether the event tells that a client stops holding the
+// agent.
+func isLeave(e *evtc.Event, k evtc.StateChange) bool {
+	return k == evtc.StateDespawn || (k == evtc.StateTeamChange && e.DstAgent == 0)
+}
+
+// ruleOf returns the rule of an event of kind k, the one of classRecording
+// for a kind the list does not know.
+func ruleOf(e *evtc.Event, k evtc.StateChange, typed bool) rule {
+	switch {
+	case k == evtc.StateTeamChange && e.DstAgent == 0:
+		return leave
+	case k == evtc.StateCombat && e.Buff != 0:
+		return tick
+	case k == evtc.StateEffect2Defunc && e.DstAgent != 0:
+		return legacyEffectOnAgent
+	case !typed && k == evtc.StateAnimationStart:
+		return legacyAnimationStart
+	case !typed && k == evtc.StateBuffChange:
+		return legacyBuffChange
+	}
+	return rules[k]
+}
+
+// timed reports whether the time field of a kind holds a time.
+func timed(k evtc.StateChange) bool {
+	switch k {
+	case evtc.StateBuffInfo, evtc.StateBuffFormula, evtc.StateSkillInfo, evtc.StateSkillTiming,
+		evtc.StateIntegrity, evtc.StateIDToGUID, evtc.StateArcBuild:
+		return false
+	}
+	return true
+}
+
+// tracks reports whether a kind tells the state of its source agent. The
+// timeline gives such an event written without address to the last agent
+// seen with its instance id, and to nobody when it saw none.
+func tracks(k evtc.StateChange) bool {
+	switch k {
+	case evtc.StatePosition, evtc.StateTeleport, evtc.StateVelocity, evtc.StateFacing,
+		evtc.StateHealthPctUpdate, evtc.StateBarrierPctUpdate, evtc.StateMaxHealthUpdate,
+		evtc.StateDefianceBarPercent, evtc.StateDefianceBarState,
+		evtc.StateChangeUp, evtc.StateChangeDown, evtc.StateChangeDead, evtc.StateSpawn, evtc.StateDespawn,
+		evtc.StateEnterCombat, evtc.StateExitCombat, evtc.StateTargetable,
+		evtc.StateWeaponSwap, evtc.StateTeamChange, evtc.StateStealthChange, evtc.StateGlider,
+		evtc.StateTransformation, evtc.StateStunBreak, evtc.StateMarker, evtc.StateGuild,
+		evtc.StateJump, evtc.StateGadgetAnimation, evtc.StateGadgetName,
+		evtc.StateGadgetModelInfo:
+		return true
+	}
+	return false
+}
