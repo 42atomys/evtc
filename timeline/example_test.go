@@ -109,6 +109,19 @@ func ExampleInterval_Split() {
 	// [1.9s, 3s] 1
 }
 
+func ExampleCompact() {
+	tl, err := timeline.Build(exampleLog())
+	if err != nil {
+		panic(err)
+	}
+	windows := tl.Hits().Map(func(h *timeline.Hit) timeline.Interval {
+		return timeline.Around(h.Time, 250*time.Millisecond)
+	})
+	fmt.Println(timeline.Compact(windows))
+	// Output:
+	// [[950ms, 1.65s] [1.75s, 2.25s]]
+}
+
 func ExampleHits_PerAgent() {
 	tl, err := timeline.Build(exampleLog())
 	if err != nil {

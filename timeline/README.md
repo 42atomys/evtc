@@ -67,7 +67,8 @@ samples the latency of the recording client (`PingAt`).
 Times are `time.Duration` values relative to the squad combat start of the
 log. `Interval{Start, End}` is closed on both ends; `tl.Interval()` is the
 whole log, `tl.Since(t)`, `tl.Until(t)`, `Around(t, d)` and
-`Interval.Split(times...)` build the usual sub-ranges. `tl.WallClock(t)`
+`Interval.Split(times...)` build the usual sub-ranges. `ivs = Compact(ivs)`
+merges the intervals that touch or overlap, in place. `tl.WallClock(t)`
 converts back to server time.
 
 `Players()` holds one player per account and `Characters()` the characters

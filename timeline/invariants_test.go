@@ -1,7 +1,6 @@
 package timeline
 
 import (
-	"cmp"
 	"math/rand/v2"
 	"slices"
 	"strconv"
@@ -857,23 +856,9 @@ func bruteUptime(stacks []*BuffStack, iv Interval) time.Duration {
 			clipped = append(clipped, c)
 		}
 	}
-	slices.SortFunc(clipped, func(a, b Interval) int { return cmp.Compare(a.Start, b.Start) })
 	var total time.Duration
-	var cur Interval
-	for i, c := range clipped {
-		if i == 0 {
-			cur = c
-			continue
-		}
-		if c.Start <= cur.End {
-			cur.End = max(cur.End, c.End)
-			continue
-		}
-		total += cur.Duration()
-		cur = c
-	}
-	if len(clipped) > 0 {
-		total += cur.Duration()
+	for _, c := range Compact(clipped) {
+		total += c.Duration()
 	}
 	return total
 }
