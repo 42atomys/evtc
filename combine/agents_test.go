@@ -1,6 +1,7 @@
 package combine
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -27,6 +28,78 @@ func TestSet(t *testing.T) {
 	s.add(63)
 	if !s.has(0) || !s.has(63) || s.has(1) || s.has(62) {
 		t.Errorf("set = %#x", uint64(s))
+	}
+}
+
+func TestPresence(t *testing.T) {
+	tests := []struct {
+		name  string
+		holds []hold
+		want  []timeline.Interval
+	}{
+		{"nothing held", nil, nil},
+		{"one entry", []hold{{rec: 0, held: []timeline.Interval{iv(0, 1000)}}}, []timeline.Interval{iv(0, 1000)}},
+		{"two entries that overlap", []hold{
+			{rec: 0, held: []timeline.Interval{iv(0, 1000)}},
+			{rec: 1, held: []timeline.Interval{iv(800, 2000)}},
+		}, []timeline.Interval{iv(0, 2000)}},
+		{"two clients that do not date alike", []hold{
+			{rec: 0, held: []timeline.Interval{iv(0, 1000)}},
+			{rec: 1, held: []timeline.Interval{iv(1300, 2000)}},
+		}, []timeline.Interval{iv(0, 2000)}},
+		{"a gap longer than sameBound", []hold{
+			{rec: 0, held: []timeline.Interval{iv(0, 1000)}},
+			{rec: 1, held: []timeline.Interval{iv(1501, 2000)}},
+		}, []timeline.Interval{iv(0, 1000), iv(1501, 2000)}},
+		{"a short gap one recording tells", []hold{
+			{rec: 0, held: []timeline.Interval{iv(0, 1000), iv(1200, 2000)}},
+		}, []timeline.Interval{iv(0, 1000), iv(1200, 2000)}},
+		{"a short gap another recording covers", []hold{
+			{rec: 0, held: []timeline.Interval{iv(0, 1000), iv(1200, 2000)}},
+			{rec: 1, held: []timeline.Interval{iv(500, 1500)}},
+		}, []timeline.Interval{iv(0, 2000)}},
+	}
+	for _, tt := range tests {
+		if got := presence(tt.holds); !slices.Equal(got, tt.want) {
+			t.Errorf("%s: presence = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
+func TestSegments(t *testing.T) {
+	var owners set
+	owners.add(1)
+	tests := []struct {
+		name   string
+		holds  []hold
+		owners set
+		want   []segment
+	}{
+		{"the longest view first", []hold{
+			{rec: 0, entry: 1, track: iv(0, 3000)},
+			{rec: 1, entry: 2, track: iv(1000, 9000)},
+		}, 0, []segment{{iv(0, 999), 0, 1}, {iv(1000, 9000), 1, 2}}},
+		{"views of the same length in the order of the recordings", []hold{
+			{rec: 1, entry: 2, track: iv(1000, 4500)},
+			{rec: 0, entry: 1, track: iv(0, 3000)},
+		}, 0, []segment{{iv(0, 3000), 0, 1}, {iv(3001, 4500), 1, 2}}},
+		{"the client of the player", []hold{
+			{rec: 0, entry: 1, track: iv(0, 9000)},
+			{rec: 1, entry: 2, track: iv(1000, 3000)},
+		}, owners, []segment{{iv(0, 999), 0, 1}, {iv(1000, 3000), 1, 2}, {iv(3001, 9000), 0, 1}}},
+		{"a view that blinks inside one that lasts", []hold{
+			{rec: 0, entry: 1, track: iv(0, 9000)},
+			{rec: 1, entry: 2, track: iv(1000, 3000)},
+		}, 0, []segment{{iv(0, 9000), 0, 1}}},
+		{"the same spawn dated some milliseconds apart", []hold{
+			{rec: 0, entry: 1, track: iv(1000, 3000)},
+			{rec: 1, entry: 2, track: iv(1040, 9000)},
+		}, 0, []segment{{iv(1000, 9000), 1, 2}}},
+	}
+	for _, tt := range tests {
+		if got := segments(tt.holds, tt.owners); !slices.Equal(got, tt.want) {
+			t.Errorf("%s: segments = %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }
 
@@ -81,5 +154,18 @@ func TestSpeaker(t *testing.T) {
 	}
 	if !x.speaks(2, 2*time.Second) || x.speaks(1, 2*time.Second) || !x.speaks(1, 4*time.Second) {
 		t.Error("an entry speaks when it holds the instant, or when nobody does")
+	}
+}
+
+// TestSegmentsOfOneRecording checks the entries a recording split: they
+// speak in the order they were held.
+func TestSegmentsOfOneRecording(t *testing.T) {
+	got := segments([]hold{
+		{rec: 0, entry: 2, track: iv(3000, 5500)},
+		{rec: 0, entry: 1, track: iv(0, 2900)},
+	}, 0)
+	want := []segment{{iv(0, 2900), 0, 1}, {iv(3000, 5500), 0, 2}}
+	if !slices.Equal(got, want) {
+		t.Errorf("segments = %v, want %v", got, want)
 	}
 }
