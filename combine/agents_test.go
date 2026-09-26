@@ -31,6 +31,27 @@ func TestSet(t *testing.T) {
 	}
 }
 
+func TestShares(t *testing.T) {
+	tests := []struct {
+		a, b timeline.Interval
+		want bool
+	}{
+		{iv(0, 1000), iv(500, 2000), true},
+		{iv(0, 1000), iv(900, 2000), true},
+		{iv(0, 1000), iv(901, 2000), false}, // less than shared
+		{iv(0, 1000), iv(1000, 2000), false},
+		{iv(0, 1000), iv(1500, 2000), false},
+		{iv(0, 1000), iv(400, 450), true}, // all of the shorter one
+		{iv(400, 450), iv(0, 1000), true},
+		{iv(0, 1000), iv(0, 1000), true},
+	}
+	for _, tt := range tests {
+		if got := shares(tt.a, tt.b); got != tt.want {
+			t.Errorf("shares(%v, %v) = %v", tt.a, tt.b, got)
+		}
+	}
+}
+
 func TestPresence(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -154,6 +175,46 @@ func TestSpeaker(t *testing.T) {
 	}
 	if !x.speaks(2, 2*time.Second) || x.speaks(1, 2*time.Second) || !x.speaks(1, 4*time.Second) {
 		t.Error("an entry speaks when it holds the instant, or when nobody does")
+	}
+}
+
+func TestSameIdentity(t *testing.T) {
+	player := func(name, account string, inst uint16) *timeline.Agent {
+		return &timeline.Agent{Kind: timeline.KindPlayer, Name: name, InstanceID: inst, Player: &timeline.Player{Account: account}}
+	}
+	npc := func(name string, inst, species uint16) *timeline.Agent {
+		return &timeline.Agent{Kind: timeline.KindNPC, Name: name, InstanceID: inst, SpeciesID: species}
+	}
+	gadget := func(name string, inst, model uint16) *timeline.Agent {
+		return &timeline.Agent{Kind: timeline.KindGadget, Name: name, InstanceID: inst, SpeciesID: model}
+	}
+	tests := []struct {
+		name string
+		a, b *timeline.Agent
+		want bool
+	}{
+		{"a player seen twice", player("Alpha", "Alpha.1234", 11), player("Alpha", "Alpha.1234", 12), true},
+		{"two characters of an account", player("Alpha", "Alpha.1234", 11), player("Beta", "Alpha.1234", 11), false},
+		{"two accounts", player("Alpha", "Alpha.1234", 11), player("Alpha", "Other.5678", 11), false},
+		{"a player without its node", player("Alpha", "Alpha.1234", 11), &timeline.Agent{Kind: timeline.KindPlayer, Name: "Alpha"}, false},
+		{"players of a public instance", player("Guardian", "", 11), player("Guardian", "", 11), true},
+		{"two players of a public instance", player("Guardian", "", 11), player("Guardian", "", 12), false},
+		{"a player and a creature", player("Alpha", "Alpha.1234", 11), npc("Alpha", 11, 0), false},
+		{"a creature seen twice", npc("Crow", 22, 1083), npc("Corbeau", 22, 1083), true},
+		{"two creatures of one instance id", npc("Crow", 22, 1083), npc("Rat", 22, 1084), false},
+		{"two instance ids", npc("Crow", 22, 1083), npc("Crow", 23, 1083), false},
+		{"a gadget seen twice", gadget("Cannon", 31, 7307), gadget("Cannon", 31, 7308), true},
+		{"agents without instance id", gadget("Turret", 0, 7307), gadget("Turret", 0, 7307), true},
+		{"agents without instance id of other names", gadget("Turret", 0, 7307), gadget("Cannon", 0, 7307), false},
+		{"agents without instance id of other models", gadget("Turret", 0, 7307), gadget("Turret", 0, 7308), false},
+	}
+	for _, tt := range tests {
+		if got := sameIdentity(tt.a, tt.b); got != tt.want {
+			t.Errorf("%s: %v", tt.name, got)
+		}
+		if got := sameIdentity(tt.b, tt.a); got != tt.want {
+			t.Errorf("%s, the other way round: %v", tt.name, got)
+		}
 	}
 }
 
