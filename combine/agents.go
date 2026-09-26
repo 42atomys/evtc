@@ -381,3 +381,211 @@ func segments(holds []hold, owners set) []segment {
 	}
 	return kept
 }
+
+// union joins the groups of two entries unless that would put in one
+// agent two entries a recording holds at the same time: by its own
+// account they are two agents.
+func union(nodes []node, groups map[int][]int, i, j int) {
+	ri, rj := find(nodes, i), find(nodes, j)
+	if ri == rj {
+		return
+	}
+	gi, gj := groups[ri], groups[rj]
+	if gi == nil {
+		gi = []int{ri}
+	}
+	if gj == nil {
+		gj = []int{rj}
+	}
+	for _, a := range gi {
+		for _, b := range gj {
+			x, y := &nodes[a], &nodes[b]
+			if x.rec == y.rec && x.agent.Kind != timeline.KindPlayer && x.events > 0 && y.events > 0 &&
+				x.life.Start < y.life.End && y.life.Start < x.life.End {
+				return
+			}
+		}
+	}
+	nodes[rj].parent = ri
+	groups[ri] = append(gi, gj...)
+	delete(groups, rj)
+}
+
+// find returns the root of the group of an entry.
+func find(nodes []node, i int) int {
+	for nodes[i].parent != i {
+		nodes[i].parent = nodes[nodes[i].parent].parent
+		i = nodes[i].parent
+	}
+	return i
+}
+
+// sameIdentity reports whether two entries may name the same agent: same
+// kind, same instance id, same species for an NPC.
+func sameIdentity(a, b *timeline.Agent) bool {
+	if a.Kind != b.Kind {
+		return false
+	}
+	if a.Kind == timeline.KindPlayer {
+		if a.Player == nil || b.Player == nil || a.Player.Account != b.Player.Account || a.Name != b.Name {
+			return false
+		}
+		// A log of a public instance names the other players by their
+		// profession and leaves their account out: the instance id
+		// tells them apart.
+		return a.Player.Account != "" || a.InstanceID == b.InstanceID
+	}
+	if a.InstanceID != b.InstanceID {
+		return false
+	}
+	if a.InstanceID == 0 {
+		// Nothing but the name and the species to go by.
+		return a.Name == b.Name && a.SpeciesID == b.SpeciesID
+	}
+	return a.Kind != timeline.KindNPC || a.SpeciesID == b.SpeciesID
+}
+
+// shares reports whether two tracks share time: shared or more, or all of
+// the shorter one.
+func shares(a, b timeline.Interval) bool {
+	o := min(a.End, b.End) - max(a.Start, b.Start)
+	if o <= 0 {
+		return false
+	}
+	within := (a.Start >= b.Start && a.End <= b.End) || (b.Start >= a.Start && b.End <= a.End)
+	return o >= shared || within
+}
+
+// lagged reports whether two entries of two recordings share time only
+// because one client learned later than the other that an agent left or
+// that the next one came: the entry that starts first ends within
+// sameBound after the other one starts, and the recording of either wrote
+// the same bound for another entry. Both recordings tell of two agents
+// then.
+func lagged(nodes []node, ids []int, i, j int) bool {
+	a, b := &nodes[i], &nodes[j]
+	if b.track.Start < a.track.Start {
+		a, b = b, a
+	}
+	if a.track.End >= b.track.End || a.track.End-b.track.Start > sameBound {
+		return false
+	}
+	for _, o := range ids {
+		n := &nodes[o]
+		if n == a || n == b || !sameIdentity(n.agent, a.agent) {
+			continue
+		}
+		// The recording of the second entry held the first agent too,
+		// and wrote that it left.
+		if n.rec == b.rec && len(n.leaves) > 0 && len(a.leaves) > 0 && n.track.End <= b.track.Start && a.track.End-n.track.End <= sameBound {
+			return true
+		}
+		// The recording of the first entry holds the second agent too,
+		// and wrote that it came.
+		if n.rec == a.rec && len(n.spawns) > 0 && len(b.spawns) > 0 && n.track.Start >= a.track.End && n.track.Start-b.track.Start <= sameBound {
+			return true
+		}
+	}
+	return false
+}
+
+// join joins the entries of one bucket that name the same agent of the
+// game. Entries of two recordings are the same appearance when they
+// started together, one entry of each recording at most; entries that held
+// the agent at the same time are the same agent, which joins the entries a
+// recording split when another one went on holding the agent; an agent
+// that never moved, met by two recordings at other times, is told by its
+// position when its instance id served once.
+func join(nodes []node, ids []int) {
+	type pair struct {
+		i, j int
+		d    time.Duration
+	}
+	if a := nodes[ids[0]].agent; a.Kind != timeline.KindPlayer && a.InstanceID == 0 {
+		// Nothing tells apart the agents without instance id that carry
+		// the same name: the first recording that holds some keeps its
+		// own.
+		perRec := map[int]int{}
+		first := nodes[ids[0]].rec
+		for _, i := range ids {
+			perRec[nodes[i].rec]++
+			first = min(first, nodes[i].rec)
+		}
+		for _, n := range perRec {
+			if n > 1 {
+				for _, i := range ids {
+					nodes[i].skip = nodes[i].rec > first
+				}
+				return
+			}
+		}
+	}
+	groups := map[int][]int{}
+	var pairs []pair
+	for x := range ids {
+		for y := x + 1; y < len(ids); y++ {
+			i, j := ids[x], ids[y]
+			if nodes[i].rec == nodes[j].rec || !sameIdentity(nodes[i].agent, nodes[j].agent) {
+				continue
+			}
+			d := nodes[i].track.Start - nodes[j].track.Start
+			if d < 0 {
+				d = -d
+			}
+			pairs = append(pairs, pair{i, j, d})
+		}
+	}
+	slices.SortStableFunc(pairs, func(a, b pair) int { return cmp.Compare(a.d, b.d) })
+	type seat struct{ node, rec int }
+	taken := map[seat]bool{}
+	for _, p := range pairs {
+		if nodes[p.i].agent.Kind == timeline.KindPlayer {
+			union(nodes, groups, p.i, p.j)
+			continue
+		}
+		if p.d > appearance {
+			break
+		}
+		si, sj := seat{p.i, nodes[p.j].rec}, seat{p.j, nodes[p.i].rec}
+		if taken[si] || taken[sj] {
+			continue
+		}
+		taken[si], taken[sj] = true, true
+		union(nodes, groups, p.i, p.j)
+	}
+	for _, p := range pairs {
+		x, y := &nodes[p.i], &nodes[p.j]
+		if shares(x.track, y.track) {
+			// An instance id names one agent at a time: entries whose
+			// events share time are the same agent; those that meet at
+			// one instant follow each other. What a recording held beyond
+			// its events is a guess, and there a still agent that stands
+			// elsewhere is another one.
+			events := x.life.Start < y.life.End && y.life.Start < x.life.End
+			if !events && x.hasPos && y.hasPos && x.still && y.still && x.pos.DistTo(y.pos) > 50 {
+				continue
+			}
+			if lagged(nodes, ids, p.i, p.j) {
+				continue
+			}
+			union(nodes, groups, p.i, p.j)
+		}
+	}
+	// The position tells nothing of an instance id that served several
+	// times: creatures come back where they were.
+	perRec := map[int]int{}
+	for _, i := range ids {
+		perRec[nodes[i].rec]++
+	}
+	for _, n := range perRec {
+		if n > 1 {
+			return
+		}
+	}
+	for _, p := range pairs {
+		x, y := &nodes[p.i], &nodes[p.j]
+		if x.hasPos && y.hasPos && x.still && y.still && x.pos.DistTo(y.pos) < 5 {
+			union(nodes, groups, p.i, p.j)
+		}
+	}
+}
