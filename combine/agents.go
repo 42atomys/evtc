@@ -1,6 +1,8 @@
 package combine
 
 import (
+	"cmp"
+	"slices"
 	"time"
 
 	"github.com/42atomys/evtc"
@@ -241,4 +243,141 @@ func near(times []time.Duration, t time.Duration) bool {
 		}
 	}
 	return false
+}
+
+// presence returns the spans over which an entry at least held the agent,
+// in time order. A gap is one when a recording tells it: it wrote that the
+// agent left and that it came back. A leave of a recording and a spawn of
+// another one less than sameBound apart are two clients that do not date
+// alike what they see: no gap.
+func presence(holds []hold) []timeline.Interval {
+	type part struct {
+		iv  timeline.Interval
+		rec int
+	}
+	var parts []part
+	for i := range holds {
+		for _, iv := range holds[i].held {
+			parts = append(parts, part{iv, holds[i].rec})
+		}
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	slices.SortFunc(parts, func(a, b part) int { return cmp.Compare(a.iv.Start, b.iv.Start) })
+	var united []timeline.Interval
+	for _, p := range parts {
+		if n := len(united); n > 0 && p.iv.Start <= united[n-1].End {
+			united[n-1].End = max(united[n-1].End, p.iv.End)
+			continue
+		}
+		united = append(united, p.iv)
+	}
+	told := func(left, right timeline.Interval) bool {
+		ends, starts := map[int]bool{}, map[int]bool{}
+		for _, p := range parts {
+			// What a recording held last of the span before, and first
+			// of the span after.
+			if p.iv.End >= left.Start && p.iv.End <= left.End && left.End-p.iv.End <= sameBound {
+				ends[p.rec] = true
+			}
+			if p.iv.Start >= right.Start && p.iv.Start <= right.End && p.iv.Start-right.Start <= sameBound {
+				starts[p.rec] = true
+			}
+		}
+		for rec := range ends {
+			if starts[rec] {
+				return true
+			}
+		}
+		return false
+	}
+	out := united[:1]
+	for _, iv := range united[1:] {
+		last := &out[len(out)-1]
+		if iv.Start-last.End <= sameBound && !told(*last, iv) {
+			last.End = max(last.End, iv.End)
+			continue
+		}
+		out = append(out, iv)
+	}
+	return out
+}
+
+// segments shares the life of an agent between its entries. The client of
+// the player speaks for its character. Otherwise the entry that held the
+// agent the longest speaks over all it held, then the next one over what
+// is left, and so on: a view that blinks does not interrupt one that
+// lasts. Entries that held the agent as long, within a second, speak in
+// the order of the recordings.
+func segments(holds []hold, owners set) []segment {
+	owned := func(h *hold) bool { return owners.has(h.rec) }
+	order := make([]int, len(holds))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(i, j int) int {
+		a, b := &holds[i], &holds[j]
+		if owned(a) != owned(b) {
+			if owned(a) {
+				return -1
+			}
+			return 1
+		}
+		if c := cmp.Compare(b.track.Duration()/time.Second, a.track.Duration()/time.Second); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.rec, b.rec); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.track.Start, b.track.Start)
+	})
+	var out []segment
+	for _, i := range order {
+		h := &holds[i]
+		// What is left of the span once the spans given are taken off.
+		left := []timeline.Interval{h.track}
+		for _, s := range out {
+			var next []timeline.Interval
+			for _, iv := range left {
+				if !iv.Overlaps(s.iv) {
+					next = append(next, iv)
+					continue
+				}
+				if iv.Start < s.iv.Start {
+					next = append(next, timeline.Interval{Start: iv.Start, End: s.iv.Start - time.Millisecond})
+				}
+				if iv.End > s.iv.End {
+					next = append(next, timeline.Interval{Start: s.iv.End + time.Millisecond, End: iv.End})
+				}
+			}
+			left = next
+		}
+		for _, iv := range left {
+			out = append(out, segment{iv: iv, rec: h.rec, entry: h.entry})
+		}
+	}
+	slices.SortFunc(out, func(a, b segment) int { return cmp.Compare(a.iv.Start, b.iv.Start) })
+
+	// Two clients date the same spawn some milliseconds apart: what the
+	// first one holds alone before the other starts is no span of its
+	// own, the other tells what the agent is when it gains it. What the
+	// last one tells after the other lost the agent, nobody else tells.
+	starts := map[int32]time.Duration{}
+	for i := range holds {
+		starts[holds[i].entry] = holds[i].track.Start
+	}
+	kept := out[:0]
+	for i := 0; i < len(out); i++ {
+		sg := out[i]
+		if sg.iv.Duration() < sameBound {
+			if i+1 < len(out) && out[i+1].entry != sg.entry && out[i+1].iv.Start == sg.iv.End+time.Millisecond &&
+				starts[sg.entry] == sg.iv.Start && starts[out[i+1].entry] == out[i+1].iv.Start {
+				out[i+1].iv.Start = sg.iv.Start
+				continue
+			}
+		}
+		kept = append(kept, sg)
+	}
+	return kept
 }
