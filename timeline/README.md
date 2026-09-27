@@ -71,6 +71,15 @@ whole log, `tl.Since(t)`, `tl.Until(t)`, `Around(t, d)` and
 merges the intervals that touch or overlap, in place. `tl.WallClock(t)`
 converts back to server time.
 
+From arcdps 20260920 the low bit of a raw event time tells where the
+event comes from: even for an event created from a server message
+(strikes, casts, buff applications and removals, life states, effects,
+missiles, teleports), odd for one the client creates (positions,
+velocity, facing, health, markers, ping, most buff ticks). A time can be
+1 ms off the moment the event was created. The builder takes the times as
+written: on 17 logs of that build, no link of the graph depends on that
+bit.
+
 `Players()` holds one player per account and `Characters()` the characters
 they brought on the field, one each unless someone swapped during the log.
 A character wraps the agent that holds its positions, health, downs and
