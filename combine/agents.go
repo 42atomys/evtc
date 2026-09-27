@@ -799,3 +799,176 @@ func masterOf(r *recording, a *timeline.Agent) *timeline.Agent {
 	}
 	return nil
 }
+
+// entities joins the entries of the recordings into the agents of the
+// combined log and gives each an address: that of the first entry of the
+// first recording that holds the agent.
+func entities(recs []*recording) []*entity {
+	nodes := entries(recs)
+	type bucket struct {
+		kind timeline.Kind
+		inst uint16
+		name string
+	}
+	buckets := map[bucket][]int{}
+	for i := range nodes {
+		a := nodes[i].agent
+		b := bucket{kind: a.Kind, inst: a.InstanceID}
+		switch {
+		case a.Kind == timeline.KindPlayer:
+			b = bucket{kind: a.Kind}
+			if a.Player != nil {
+				b.name = a.Player.Account
+			}
+		case a.InstanceID == 0:
+			b.name = a.Name
+		}
+		buckets[b] = append(buckets[b], i)
+	}
+	for _, ids := range buckets {
+		join(nodes, ids)
+	}
+	groups := map[int][]int{}
+	var roots []int
+	for i := range nodes {
+		if nodes[i].skip {
+			recs[nodes[i].rec].unnamed[nodes[i].agent] = true
+			continue
+		}
+		r := find(nodes, i)
+		if _, ok := groups[r]; !ok {
+			roots = append(roots, r)
+		}
+		groups[r] = append(groups[r], i)
+	}
+
+	used := map[uint64]bool{}
+	for i := range nodes {
+		if nodes[i].rec == 0 {
+			used[nodes[i].agent.Addr] = true
+		}
+	}
+	// The first recording keeps the addresses it names no agent of its
+	// timeline at: none of them goes to an agent of another recording.
+	ref := recs[0]
+	for i := range ref.tl.Log.Events {
+		e := &ref.tl.Log.Events[i]
+		if !timed(e.IsStateChange) {
+			continue
+		}
+		rl := ruleOf(e, kindOf(e, ref.typed), ref.typed)
+		if rl.src && e.SrcAgent != 0 && ref.tl.AgentOf(e.SrcAgent, e.SrcInstanceID) == nil {
+			used[e.SrcAgent] = true
+		}
+		if rl.dst && e.DstAgent != 0 && ref.tl.AgentOf(e.DstAgent, e.DstInstanceID) == nil {
+			used[e.DstAgent] = true
+		}
+	}
+	var ents []*entity
+	next := uint64(0x7e00_0000_0000_0000)
+	// The characters of an account share its address. The players a log
+	// lists without account are not those of one account.
+	playerAddr := map[string]uint64{}
+	for _, c := range recs[0].tl.Characters().All() {
+		if c.Player.Account != "" {
+			playerAddr[c.Player.Account] = c.Addr
+		}
+	}
+	first := forever
+	for _, r := range recs {
+		first = min(first, r.span.Start)
+	}
+	for _, r := range roots {
+		ids := groups[r]
+		slices.SortStableFunc(ids, func(i, j int) int {
+			if c := cmp.Compare(nodes[i].rec, nodes[j].rec); c != 0 {
+				return c
+			}
+			return cmp.Compare(nodes[i].track.Start, nodes[j].track.Start)
+		})
+		head := nodes[ids[0]]
+		a := head.agent
+		x := &entity{id: int32(len(ents) + 1), kind: a.Kind, inst: a.InstanceID, until: forever, first: min(first, 0)}
+		for _, i := range ids {
+			nd := nodes[i]
+			if pov := recs[nd.rec].tl.POV; pov != nil && nd.agent.Player == pov {
+				x.owners.add(nd.rec)
+			}
+		}
+		switch {
+		case head.rec == 0:
+			x.addr = a.Addr
+		case a.Kind == timeline.KindPlayer && a.Player != nil && playerAddr[a.Player.Account] != 0:
+			x.addr = playerAddr[a.Player.Account]
+		case !used[a.Addr]:
+			x.addr = a.Addr
+		default:
+			for used[next] {
+				next++
+			}
+			x.addr = next
+		}
+		used[x.addr] = true
+		for _, i := range ids {
+			nd := nodes[i]
+			if x.raw == nil {
+				x.raw = nd.agent.Raw
+			}
+			x.known = x.known || nd.known
+			if nd.events > 0 {
+				x.holds = append(x.holds, nd.hold)
+			}
+			rec := recs[nd.rec]
+			rec.entity[nd.agent] = x
+			rec.members[x] = append(rec.members[x], nd.agent)
+		}
+		x.speak = segments(x.holds, x.owners)
+		x.spans = presence(x.holds)
+		ents = append(ents, x)
+	}
+
+	// The master of a minion is a field of the events that name the
+	// minion: a client that does not know it leaves it out.
+	for _, r := range recs {
+		for _, a := range r.tl.Agents().All() {
+			of := masterOf(r, a)
+			x, mx := r.entity[a], r.entity[of]
+			if x == nil || mx == nil {
+				continue
+			}
+			if x.master == nil {
+				x.master, x.masterInst = mx, of.InstanceID
+			}
+			if x.master == mx {
+				x.named = append(x.named, r.entry[a])
+			}
+		}
+	}
+
+	// An instance id names one agent at a time: an agent left when the
+	// next one of its id comes.
+	type id struct {
+		kind timeline.Kind
+		inst uint16
+	}
+	by := map[id][]*entity{}
+	for _, x := range ents {
+		if x.kind != timeline.KindPlayer && x.inst != 0 && len(x.holds) > 0 {
+			by[id{x.kind, x.inst}] = append(by[id{x.kind, x.inst}], x)
+		}
+	}
+	for _, l := range by {
+		slices.SortStableFunc(l, func(a, b *entity) int { return cmp.Compare(a.start(), b.start()) })
+		for i := 0; i+1 < len(l); i++ {
+			if next := l[i+1].start(); next > l[i].start() {
+				l[i].until = next
+				for _, h := range l[i+1].holds {
+					if h.track.Start-next <= sameBound {
+						l[i].seen.add(h.rec)
+					}
+				}
+			}
+		}
+	}
+	return ents
+}
