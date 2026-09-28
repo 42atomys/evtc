@@ -87,6 +87,12 @@ the graph. The arcdps reference is
 - `tl.Unknown` is the sentinel for address 0 (environment, out of range).
   It never gets a master and never carries tracked states. Filters accept
   an `Entity` and a nil entity matches nothing.
+- The master of an agent and its instance id come from the events of
+  arcdps, and a player has no master. An extension event is in the
+  events of the agents its addresses name and tells nothing else of
+  them; `checkNaming` (`invariants_test.go`) verifies it. An instance id
+  only an extension gives belongs to an agent no table lists and stays
+  out of `AgentAt`.
 - Queries are lazy: filters compose predicates, `Skip`/`Limit`/`Reverse`
   describe the traversal, terminals iterate. `Query.Seq` keeps a tight
   inlinable loop for the plain forward case: check `BenchmarkHitsFiltered`
@@ -158,8 +164,9 @@ go test ./extensions/healingstats -run XXX -fuzz FuzzDecode -fuzztime 30s # afte
   removes written with them and are not attached to anything.
 - `DESPAWN` (and a few other state events) of minions and NPCs are written
   with `src_agent` 0 and only `src_instid` set; the builder resolves them
-  through the agent last seen with that instance id. Agents leave tracking
-  with their buffs: a despawn ends their open stacks (`EndedByDespawn`).
+  through the agent arcdps saw last with that instance id. Agents leave
+  tracking with their buffs: a despawn ends their open stacks
+  (`EndedByDespawn`).
 - Instance ids are reused by successive agents; resolve them with
   `tl.AgentAt(inst, t)`, never by id alone.
 - Extension combat events carry the extension signature in `pad61..pad64`;
@@ -171,3 +178,14 @@ go test ./extensions/healingstats -run XXX -fuzz FuzzDecode -fuzztime 30s # afte
   clients running the addon is written twice and the decoder pairs the
   records within `PeerWindow`; identical heals in the same millisecond
   from one client are real (one per boon granted, for example).
+- An extension keeps a list of agents of its own. Its events may name an
+  address no table lists, or the address of an agent under the instance
+  id and the master of another one. The master of an agent, and the
+  instance ids it carries, are those its other events name. Over 10,565
+  logs, 3,155 with the healing addon: 6,196 of 3.8 million named agents
+  come with the instance id arcdps gives another address (294 logs),
+  5,599 of them at an address no table lists; 258 name a player with a
+  master (68 logs), and no event of arcdps ever does. The instance ids
+  and the masters are right, the addresses are those the addon kept: it
+  names a gyrocopter by the address of the clone that held its instance
+  id 38 s before.

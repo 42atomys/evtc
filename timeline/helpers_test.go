@@ -499,6 +499,12 @@ func (b *logBuilder) extensionCombat(t, src, dst uint64, skill uint32, value int
 	b.add(withTrackable(evtc.Event{Time: b.at(t), SrcAgent: src, DstAgent: dst, SkillID: skill, BuffDamage: value, Buff: 1, IsStateChange: evtc.StateExtensionCombat}, sig))
 }
 
+// addonHeal writes e as a combat event of the healing addon.
+func (b *logBuilder) addonHeal(e evtc.Event) {
+	e.IsStateChange = evtc.StateExtensionCombat
+	b.raw(e, func(buf *[64]byte) { putTrackable(buf, ExtensionHealingStats) })
+}
+
 // stateByInst writes a state event with src_agent 0 and only the instance
 // id set, as arcdps does for the despawn of minions.
 func (b *logBuilder) stateByInst(t uint64, inst uint16, kind evtc.StateChange) {

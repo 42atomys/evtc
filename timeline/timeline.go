@@ -215,7 +215,8 @@ func (tl *Timeline) canonical(addr uint64) uint64 {
 
 // AgentAt returns the agent that carried the instance id at time t, or
 // nil when there is none. Instance ids are reused by successive agents,
-// so the lookup is resolved against agent lifetimes.
+// so the lookup is resolved against agent lifetimes. It never answers with
+// an agent whose instance id only an extension gives.
 func (tl *Timeline) AgentAt(instID uint16, t time.Duration) *Agent {
 	var n nearest[*Agent]
 	for _, a := range tl.byInst[instID] {

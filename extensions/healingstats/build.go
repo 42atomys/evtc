@@ -46,6 +46,7 @@ type peerKey struct {
 func build(x *timeline.Extension) *Stats {
 	s := &Stats{Timeline: x.Timeline, Extension: x, Version: x.Version, Revision: int(x.Event.SrcAgent >> 32 & 0xffffff)}
 	s.makeAgents()
+	s.adopt()
 	s.fill(s.merge())
 	s.finish()
 	return s
@@ -72,6 +73,68 @@ func (s *Stats) makeAgents() {
 	for c := range tl.Characters().Seq() {
 		s.players = append(s.players, s.byAgent[c.Agent])
 	}
+}
+
+// adopt gives each agent arcdps does not list, and without a master, the
+// first master the records name for it.
+func (s *Stats) adopt() {
+	tl := s.Timeline
+	total := 0
+	for _, n := range s.agents {
+		a := n.Agent
+		if a.Raw != nil || a.Master != nil {
+			continue
+		}
+		for e := range a.Events().Seq() {
+			if tl.ExtensionOf(e) != s.Extension {
+				continue
+			}
+			// The record is about a unless its instance id names another
+			// agent then.
+			t := tl.TimeOf(e)
+			if (e.SrcMasterInstanceID != 0 && s.resolve(e.SrcAgent, e.SrcInstanceID, t) == a && s.adoptBy(n, e.SrcMasterInstanceID, t)) ||
+				(e.DstMasterInstanceID != 0 && s.resolve(e.DstAgent, e.DstInstanceID, t) == a && s.adoptBy(n, e.DstMasterInstanceID, t)) {
+				total++
+				break
+			}
+		}
+	}
+	if total == 0 {
+		return
+	}
+	refs := make([]*Agent, total)
+	for _, a := range s.agents {
+		a.adopted = carve(&refs, a.cnt.adopted)
+	}
+	for _, a := range s.agents {
+		if a.master != nil {
+			a.master.adopted = append(a.master.adopted, a)
+		}
+	}
+}
+
+// adoptBy gives n the master with the given instance id at t, and reports
+// whether the instance id names another agent of the log.
+func (s *Stats) adoptBy(n *Agent, master uint16, t time.Duration) bool {
+	tl := s.Timeline
+	m := tl.AgentAt(master, t)
+	if m == nil || m == n.Agent || m == tl.Unknown {
+		return false
+	}
+	n.master = s.byAgent[m]
+	n.master.cnt.adopted++
+	return true
+}
+
+// ownerOf is owner for a timeline agent.
+func (s *Stats) ownerOf(a *timeline.Agent) *timeline.Agent {
+	switch {
+	case a.Master != nil:
+		return a.Master
+	case a.Raw == nil:
+		return s.node(a).owner().Agent
+	}
+	return a
 }
 
 // nodes returns every node, the Unknown one last.
@@ -142,8 +205,8 @@ func (s *Stats) merge() []record {
 // or one of its minions.
 func (s *Stats) local(e *evtc.Event, pov *timeline.Agent) bool {
 	src, dst := s.parties(e)
-	return (e.IsOffcycle&flagFromSrc != 0 && credited(src) == pov) ||
-		(e.IsOffcycle&flagFromDst != 0 && credited(dst) == pov)
+	return (e.IsOffcycle&flagFromSrc != 0 && s.ownerOf(src) == pov) ||
+		(e.IsOffcycle&flagFromDst != 0 && s.ownerOf(dst) == pov)
 }
 
 // agents returns the source and the destination of a record. The addon
@@ -174,14 +237,6 @@ func (s *Stats) resolve(addr uint64, inst uint16, t time.Duration) *timeline.Age
 	}
 	if a == nil {
 		return tl.Unknown
-	}
-	return a
-}
-
-// credited returns the master of a minion, otherwise the agent itself.
-func credited(a *timeline.Agent) *timeline.Agent {
-	if a != nil && a.Master != nil {
-		return a.Master
 	}
 	return a
 }
@@ -272,6 +327,9 @@ func (s *Stats) finish() {
 		for _, m := range a.Minions {
 			a.healsCredited = append(a.healsCredited, s.byAgent[m].heals...)
 		}
+		for _, m := range a.adopted {
+			a.healsCredited = append(a.healsCredited, m.heals...)
+		}
 		slices.SortStableFunc(a.healsCredited, func(x, y *Heal) int { return cmp.Compare(x.Time, y.Time) })
 	}
 
@@ -308,11 +366,15 @@ func (s *Stats) finish() {
 	}
 }
 
-// minionHeals counts the heals dealt by the minions of a.
+// minionHeals counts the heals dealt by the minions of a, adopted ones
+// included.
 func (s *Stats) minionHeals(a *Agent) int {
 	n := 0
 	for _, m := range a.Minions {
 		n += len(s.byAgent[m].heals)
+	}
+	for _, m := range a.adopted {
+		n += len(m.heals)
 	}
 	return n
 }
@@ -342,7 +404,5 @@ func (s *Stats) markRecorded(a *Agent) {
 		return
 	}
 	a.Recorded = true
-	if m := a.Master; m != nil {
-		s.byAgent[m].Recorded = true
-	}
+	a.owner().Recorded = true
 }

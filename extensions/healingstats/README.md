@@ -76,7 +76,10 @@ and nothing is copied until a terminal is called.
   written by one client in the same instant (one heal per boon granted,
   for example) are distinct heals and stay so.
 - **Credit.** `Heal.Credited()` is the master of a minion source, as for
-  hits; `HealsCredited` and `PerAgent` follow that rule.
+  hits; `HealsCredited` and `PerAgent` follow that rule. The master is
+  the one the timeline gives, from the events of arcdps. An agent arcdps
+  does not list and gives no master takes the first one a record names,
+  and its `Agent.Master` is nil.
 - **Casts.** `Heal.Cast` is the most recent cast of the same skill by the
   same agent started before the heal, as the timeline attributes hits;
   `OfCast` keeps the heals of one cast.
@@ -87,11 +90,12 @@ and nothing is copied until a terminal is called.
   member shares through its own agent table, which misses some agents
   (minions, allied NPCs): it writes 0 or an address the log never
   declares. The decoder then resolves the agent through the instance id
-  at the time of the heal, as the timeline does for despawns. A source
-  that stays unknown is `Stats.Unknown`, the node of the Unknown sentinel
-  of the timeline. The skill of every heal is a `Skill` of the timeline,
-  which knows the ids of the extension events as arcdps adds them to its
-  skill table.
+  at the time of the heal, as the timeline does for despawns: the agent
+  arcdps saw with that instance id then, or the agent of the address
+  when arcdps saw none. A source that stays unknown is `Stats.Unknown`,
+  the node of the Unknown sentinel of the timeline. The skill of every
+  heal is a `Skill` of the timeline, which knows the ids of the extension
+  events as arcdps adds them to its skill table.
 - **Nil is empty.** `Of` returns nil for a log without the addon; the
   methods of `Stats` and `Agent` accept a nil receiver and answer as for
   an empty log. Fields do not: check `h != nil` before reading them.
@@ -206,15 +210,15 @@ through the `e10` export of arcdps, which sets the signature `0x9c9b3c99`
 in `pad61` to `pad64` and adds the skill to the skill table. Measured on
 117 logs of the addon versions 2.17 to 2.19 (format revision 2).
 
-| Event                                                                                                                   | Fields                                                                                                                                                                                                           | Graph                                                                              |
-| ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Registration (`EXTENSION`)                                                                                              | `src_agent`: signature in the low 32 bits, format revision in the next 24, length of the version string in the top 8; `dst_agent`: the version string                                                            | `Stats.Revision`, `Version`, `Extension`                                           |
-| Heal (`EXTENSIONCOMBAT`, `buff` 0)                                                                                      | `value`: the amount healed, negated                                                                                                                                                                              | `Heal` with `Amount`, `IsBuff` false                                               |
-| Tick of a buff (`buff` 1)                                                                                               | `buff_dmg`: the amount healed, negated; `value` 0                                                                                                                                                                | `Heal` with `IsBuff`                                                               |
-| Barrier (`is_shields` 1)                                                                                                | the amount in `value` or `buff_dmg` as above, repeated in `overstack_value`                                                                                                                                      | `Heal` with `IsBarrier`                                                            |
-| Every heal                                                                                                              | `src_agent`, `dst_agent`, `src_instid`, `dst_instid`, masters, `skillid`, `iff`, `is_ninety`, `is_fifty`, `is_moving` as arcdps writes them                                                                      | `Src`, `Dst`, `Skill`, `IFF`, `OverNinety`, `UnderFifty`, `Moving`, `TargetMoving` |
-| Every heal                                                                                                              | `is_offcycle`: bit 7 the client of the source (or of its master) wrote the event, bit 6 the client of the destination did, bit 5 the target of a buff tick was downed, bit 0 the arcdps flag for a downed target | `SrcRecorded`, `DstRecorded`, `TargetDowned`, `Agent.Recorded`, `Stats.Recorded`   |
-| Two records with opposite recording flags, the same instance ids, skill, amounts and kind, within `PeerWindow` (500 ms) |                                                                                                                                                                                                                  | one `Heal` with `PeerEvent`, counted in `Stats.Merged`                             |
+| Event                                                                                                                   | Fields                                                                                                                                                                                                            | Graph                                                                                            |
+| ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Registration (`EXTENSION`)                                                                                              | `src_agent`: signature in the low 32 bits, format revision in the next 24, length of the version string in the top 8; `dst_agent`: the version string                                                             | `Stats.Revision`, `Version`, `Extension`                                                         |
+| Heal (`EXTENSIONCOMBAT`, `buff` 0)                                                                                      | `value`: the amount healed, negated                                                                                                                                                                               | `Heal` with `Amount`, `IsBuff` false                                                             |
+| Tick of a buff (`buff` 1)                                                                                               | `buff_dmg`: the amount healed, negated; `value` 0                                                                                                                                                                 | `Heal` with `IsBuff`                                                                             |
+| Barrier (`is_shields` 1)                                                                                                | the amount in `value` or `buff_dmg` as above, repeated in `overstack_value`                                                                                                                                       | `Heal` with `IsBarrier`                                                                          |
+| Every heal                                                                                                              | `src_agent`, `dst_agent`, `src_instid`, `dst_instid`, `skillid`, `iff`, `is_ninety`, `is_fifty`, `is_moving` as arcdps writes them; `src_master_instid` and `dst_master_instid` for an agent arcdps does not list | `Src`, `Dst`, `Skill`, `IFF`, `OverNinety`, `UnderFifty`, `Moving`, `TargetMoving`, `Credited()` |
+| Every heal                                                                                                              | `is_offcycle`: bit 7 the client of the source (or of its master) wrote the event, bit 6 the client of the destination did, bit 5 the target of a buff tick was downed, bit 0 the arcdps flag for a downed target  | `SrcRecorded`, `DstRecorded`, `TargetDowned`, `Agent.Recorded`, `Stats.Recorded`                 |
+| Two records with opposite recording flags, the same instance ids, skill, amounts and kind, within `PeerWindow` (500 ms) |                                                                                                                                                                                                                   | one `Heal` with `PeerEvent`, counted in `Stats.Merged`                                           |
 
 `result`, `is_activation` and `is_buffremove` are always zero;
 `is_flanking` carries no flag on these events and is not read. Elite

@@ -136,9 +136,13 @@ hits and events whose source the log does not know; it is never nil.
   and `tl.TargetBySpeciesIDAt(id, t)` resolve them against lifetimes with
   `InstanceTolerance` (300 ms) of slack. The characters of a player share
   their address; `tl.AgentOf(addr, id)` picks the one an event names.
+  `AgentAt` never answers with an agent whose instance id only an
+  extension gives.
 - **Minions.** `Agent.Hits()` holds the hits of the agent itself;
   `HitsCredited()` adds those of its pets, clones, turrets and mechs, which
   is what a damage meter shows. `PerAgent` credits minions the same way.
+  The master of an agent is the first one an event of arcdps names for
+  it; a player has none.
 - **Rankings.** `PerAgent`, `PerTarget` and `PerSkill` on `Hits`, and
   `PerSkill` on `Casts`, return shares sorted by damage or by number of
   casts, each holding a query of its own. `Breakbar.CCHits()` keeps the
@@ -576,7 +580,7 @@ Effects come from `EFFECT2` until arcdps 20250603.
 | `BUFFINFO`                                                                                          | `overstack_value`, `src_master_instid`, `is_offcycle`, `pad61`, `is_flanking`, `is_shields`, `pad62`                                                                                                                                                                                               | `Buff`                                                                                                                                                                                       |
 | `ANIMATIONSTART`, `ANIMATIONSTOP`                                                                   | `src_agent`, `dst_agent` target, `value`, `buff_dmg`, `skillid`, `is_activation`                                                                                                                                                                                                                   | `Cast`                                                                                                                                                                                       |
 | `BUFFAPPLY`, `BUFFINITIAL`, `BUFFCHANGE`, `BUFFREMOVE_SINGLE`, `BUFFREMOVE_ALL`                     | `src_agent`, `dst_agent`, `value`, `buff_dmg` (original duration), `is_shields` (active on apply), `is_buffremove`, `pad61` to `pad64` as the trackable id                                                                                                                                         | `BuffStack`; a remove-all closes the stacks its single removes left open (it summarizes them: `value` sums their durations and `result` counts them)                                         |
-| `DESPAWN` with `src_agent` 0                                                                        | `src_instid` names the agent, as arcdps writes it for minions and NPCs                                                                                                                                                                                                                             | `Agent.Life` (gone), the stacks of the agent end there                                                                                                                                       |
+| `DESPAWN` with `src_agent` 0                                                                        | `src_instid` names the agent, as arcdps writes it for minions and NPCs: the last one an event of arcdps named under it                                                                                                                                                                             | `Agent.Life` (gone), the stacks of the agent end there                                                                                                                                       |
 | `BUFFACTIVE`, `BUFFDEACTIVE`                                                                        | `dst_agent` (active) or `pad61` (deactive) as the trackable id                                                                                                                                                                                                                                     | `BuffStack.Active`                                                                                                                                                                           |
 | `SKILLINFO`, `SKILLTIMING`, `BUFFFORMULA`                                                           | `time` as float[4] (cost, ranges, tooltip seconds); `src_agent` kind and `dst_agent` time; `time` as float[9] and `src_instid` as float[2]                                                                                                                                                         | `Skill.Cost`, `Timings`, `Buff.Formulas`                                                                                                                                                     |
 | `IDTOGUID`                                                                                          | `src_agent` as 16 bytes, `overstack_value` kind, `skillid` id, `buff_dmg` as float default duration                                                                                                                                                                                                | `Timeline.GUID`, `Skill.GUID`, effect defaults                                                                                                                                               |
@@ -634,6 +638,15 @@ registered extension found in a log to its decoder once the core graph
 is complete, and keeps the result in `Extension.Decoded`. Importing the
 package is all a program does; the package offers a typed accessor for
 the result.
+
+An extension names agents from a list of its own. In 294 logs of 10,565,
+the healing stats addon names an agent by another address than arcdps
+does 6,196 times out of 3.8 million, 597 of them by the address of
+another agent of the table. The events of an extension are in
+`Agent.Events()` of the agents their addresses name and tell nothing else
+of them: no master, no instance id, no agent for a despawn written
+without address. An address only an extension names gives an agent of
+kind `KindUnknown`, which holds the instance id the extension wrote.
 
 `extensions/healingstats` decodes the healing stats addon this way; its
 agent nodes embed the timeline agents, so every filter of this package

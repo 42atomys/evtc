@@ -152,7 +152,9 @@ type Agent struct {
 	// Event.DstAgent).
 	Addr uint64
 	// InstanceID is the in-game instance id seen on events. Instance ids
-	// are reused by successive agents, see Timeline.AgentAt.
+	// are reused by successive agents, see Timeline.AgentAt. An agent no
+	// table lists holds the one an extension wrote when no event of arcdps
+	// gives one.
 	InstanceID uint16
 	// Kind tells whether the agent is a player, an NPC, a gadget or
 	// unknown.

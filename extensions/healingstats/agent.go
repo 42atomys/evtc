@@ -21,8 +21,25 @@ type Agent struct {
 	// member sharing its stats with it, or a minion of one of them.
 	Recorded bool
 
+	// master is the first master the records name for an agent arcdps
+	// does not list, adopted the agents that took this one as master.
+	master  *Agent
+	adopted []*Agent
+
 	heals, healsTaken, healsCredited []*Heal
-	cnt                              struct{ heals, taken int }
+	cnt                              struct{ heals, taken, adopted int }
+}
+
+// owner returns the node credited for what the agent does: its master,
+// from the timeline or from the records, otherwise the agent itself.
+func (a *Agent) owner() *Agent {
+	if m := a.Master; m != nil {
+		return a.Stats.byAgent[m]
+	}
+	if a.master != nil {
+		return a.master
+	}
+	return a
 }
 
 // Ref returns the timeline agent behind the node, nil for a nil node.

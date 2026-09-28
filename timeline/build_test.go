@@ -139,6 +139,96 @@ func TestSentinelHasNoMaster(t *testing.T) {
 	checkInvariants(t, tl)
 }
 
+func TestExtensionGivesNoMaster(t *testing.T) {
+	b := fixture()
+	b.extension(0, uint64(ExtensionHealingStats), "2.19rc2")
+	b.hit(1000, addrP1, addrBoss, skillSlam, 100, evtc.ResultStrikeDamageNormal)
+	b.hit(1100, addrP2, addrBoss, skillSlam, 200, evtc.ResultStrikeDamageNormal)
+	b.minionHit(1200, addrPet, addrBoss, instP2, skillHeat, 50)
+	// The addon writes a heal on the pet of Bravo under the address of
+	// Alpha, and one by the add with a master arcdps never names.
+	b.addonHeal(evtc.Event{Time: b.at(1500), SrcAgent: addrP2, DstAgent: addrP1, DstInstanceID: instPet, DstMasterInstanceID: instP2, SkillID: skillHeat, Value: -300})
+	b.addonHeal(evtc.Event{Time: b.at(1600), SrcAgent: addrAdd, SrcMasterInstanceID: instP2, DstAgent: addrP2, SkillID: skillHeat, Value: -200})
+	// A strike that names a player with a master gives none either.
+	b.add(evtc.Event{Time: b.at(1700), SrcAgent: addrBoss, DstAgent: addrP1, DstMasterInstanceID: instP2, SkillID: skillSlam, Value: 5, IFF: evtc.IFFFoe})
+	tl := mustBuild(t, b.build(5000))
+
+	p1, p2, pet, add := tl.characters[0], tl.characters[1], tl.Agent(addrPet), tl.Agent(addrAdd)
+	if p1.Master != nil || add.Master != nil || pet.Master != p2.Agent || len(p2.Minions) != 1 || p2.Minions[0] != pet {
+		t.Errorf("masters: Alpha %v, add %v, pet %v, minions of Bravo %v", p1.Master, add.Master, pet.Master, p2.Minions)
+	}
+	if p1.InstanceID != instP1 || tl.AgentAt(instPet, 1500*msec) != pet {
+		t.Errorf("Alpha has the instance id %d, %d belongs to %v", p1.InstanceID, instPet, tl.AgentAt(instPet, 1500*msec))
+	}
+	if got := tl.Hits().CreditedTo(p2); got.Count() != 2 || got.Damage() != 250 || p2.HitsCredited().Count() != 2 || p1.HitsCredited().Count() != 1 {
+		t.Errorf("Bravo is credited %d hits for %d", got.Count(), got.Damage())
+	}
+	// The events stay with the agents their addresses name.
+	if p1.Events().Of(evtc.StateExtensionCombat).Count() != 1 || add.Events().Of(evtc.StateExtensionCombat).Count() != 1 || tl.Extension(ExtensionHealingStats).Events().Count() != 2 {
+		t.Errorf("extension events: %d on Alpha, %d on the add", p1.Events().Of(evtc.StateExtensionCombat).Count(), add.Events().Of(evtc.StateExtensionCombat).Count())
+	}
+	checkInvariants(t, tl)
+}
+
+func TestExtensionAgentTakesNoDespawn(t *testing.T) {
+	const ofAddon = 0x7d1
+	b := fixture()
+	b.extension(0, uint64(ExtensionHealingStats), "2.19rc2")
+	b.state(1000, addrAdd, evtc.StateSpawn)
+	b.buffApply(1200, addrP1, addrAdd, skillBurn, 5000, 7)
+	// The addon names the add by an address no table lists, then the add
+	// leaves: arcdps writes its despawn without address.
+	b.addonHeal(evtc.Event{Time: b.at(1500), SrcAgent: ofAddon, SrcInstanceID: instAdd, DstAgent: addrP1, SkillID: skillHeat, Value: -300})
+	b.stateByInst(2000, instAdd, evtc.StateDespawn)
+	tl := mustBuild(t, b.build(5000))
+
+	add, ghost := tl.Agent(addrAdd), tl.Agent(ofAddon)
+	if add.LifeStateAt(2500*msec) != LifeGone || add.Lifetime != NewInterval(time.Second, 2*time.Second) {
+		t.Errorf("add life = %v, lifetime %v", add.Life.All(), add.Lifetime)
+	}
+	if s := add.Stacks().First(); s == nil || !s.EndedByDespawn || s.Interval.End != 2*time.Second {
+		t.Errorf("stack of the add = %+v", s)
+	}
+	// The agent of the addon keeps the instance id of the add, but none
+	// of the events of the add.
+	if ghost == nil || ghost.Kind != KindUnknown || ghost.InstanceID != instAdd || ghost.Life.Len() != 1 || ghost.Lifetime != At(1500*msec) || ghost.Events().Count() != 1 {
+		t.Fatalf("agent of the addon = %+v, life %v", ghost, ghost.Life.All())
+	}
+	if tl.AgentAt(instAdd, 1500*msec) != add || tl.AgentAt(instAdd, 3*time.Second) != nil || tl.Unknown.Events().Count() != 0 {
+		t.Errorf("%d belongs to %v, %d events without agent", instAdd, tl.AgentAt(instAdd, 1500*msec), tl.Unknown.Events().Count())
+	}
+	checkInvariants(t, tl)
+}
+
+func TestExtensionClaimsNoEntry(t *testing.T) {
+	// Bravo swaps to Charlie at 4 s. Before that the addon names Bravo
+	// under the instance id of the pet, after that under its own.
+	b := fixture()
+	b.player(addrP2, instP2, "Charlie", ":Bravo.5678", "3", 7, 59)
+	b.extension(0, uint64(ExtensionHealingStats), "2.19rc2")
+	b.hit(1000, addrP2, addrBoss, skillHeat, 10, evtc.ResultStrikeDamageNormal)
+	b.minionHit(1500, addrPet, addrBoss, instP1, skillHeat, 50)
+	b.addonHeal(evtc.Event{Time: b.at(2000), SrcAgent: addrP1, DstAgent: addrP2, DstInstanceID: instPet, DstMasterInstanceID: instP1, SkillID: skillHeat, Value: -300})
+	b.add(evtc.Event{Time: b.at(4000), SrcAgent: addrP2, SrcInstanceID: 77, DstAgent: addrBoss, SkillID: skillHeat, Value: 20, IFF: evtc.IFFFoe})
+	b.addonHeal(evtc.Event{Time: b.at(4500), SrcAgent: addrP1, DstAgent: addrP2, DstInstanceID: instP2, SkillID: skillHeat, Value: -100})
+	tl := mustBuild(t, b.build(8000))
+
+	bravo, charlie, pet := tl.CharacterByName("Bravo"), tl.CharacterByName("Charlie"), tl.Agent(addrPet)
+	if bravo == nil || charlie == nil || bravo.InstanceID != instP2 || charlie.InstanceID != 77 {
+		t.Fatalf("characters = %v and %v", bravo, charlie)
+	}
+	if charlie.Lifetime != At(4*time.Second) || bravo.Lifetime != NewInterval(time.Second, 4500*msec) {
+		t.Errorf("lifetimes = %v and %v", bravo.Lifetime, charlie.Lifetime)
+	}
+	if bravo.Events().Of(evtc.StateExtensionCombat).Count() != 2 || charlie.Events().Of(evtc.StateExtensionCombat).Count() != 0 {
+		t.Errorf("extension events: %d on Bravo, %d on Charlie", bravo.Events().Of(evtc.StateExtensionCombat).Count(), charlie.Events().Of(evtc.StateExtensionCombat).Count())
+	}
+	if tl.AgentAt(instPet, 2*time.Second) == charlie.Agent || tl.AgentAt(instPet, 1500*msec) != pet || tl.AgentOf(addrP2, instPet) != bravo.Agent || tl.AgentOf(addrP2, 77) != charlie.Agent {
+		t.Errorf("%d belongs to %v at 2 s", instPet, tl.AgentAt(instPet, 2*time.Second))
+	}
+	checkInvariants(t, tl)
+}
+
 func TestAddressChange(t *testing.T) {
 	const old = 0x9999
 	b := fixture()
