@@ -12,7 +12,7 @@ outside the standard library. `cmd/` holds one small command.
 
 | Path                       | Role                                                                                                                                                                                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `.` (package `evtc`)       | Raw decoder: `.evtc`/`.zevtc` file to header, agent table, skill table and events. No interpretation beyond `Has` and `Warnings`.                                                                                                                      |
+| `.` (package `evtc`)       | Raw decoder: `.evtc`/`.zevtc` file to header, agent table, skill table and events, and the writer that puts a log back in a file (`write.go`). No interpretation beyond `Has` and `Warnings`.                                                          |
 | `timeline/`                | Temporal graph over a decoded log: agents, hits, casts, buff stacks, effects, missiles, states over time, lazy queries. The main API. Core arcdps only: extension events stay attached to their `Extension` and go to a registered `ExtensionDecoder`. |
 | `extensions/healingstats/` | Decoder of the healing stats addon: heals and barrier as nodes linked to the timeline agents, skills and casts, with `Heals` queries. One package per extension under `extensions/`, each registering its decoder in `init`.                           |
 | `cmd/evtcparser/`          | Tiny command printing a log summary.                                                                                                                                                                                                                   |
@@ -105,6 +105,9 @@ the graph. The arcdps reference is
   fails otherwise. Comments are short English sentences.
 - The cookbook in `timeline/README.md` is a verbatim copy of the Example
   functions in `timeline/example_readme_test.go`: change both together.
+- A log written by `WriteTo` or `WriteFile` reads back as it was
+  (`FuzzParse`). The bytes are those arcdps wrote, the four bytes of
+  padding that end each agent aside.
 
 ## Working on it
 
