@@ -20,9 +20,10 @@ type genOptions struct {
 }
 
 // genLog generates a deterministic synthetic log: a boss, respawning adds
-// sharing instance ids, a gadget with an attack target, and players that
-// move, cast, hit, receive buffs, go down and die. Events are appended in
-// the order arcdps would write them, which is only nearly sorted by time.
+// sharing instance ids, a gadget with an attack target, players that
+// move, cast, hit, receive buffs, go down and die, and the heals an addon
+// writes about them. Events are appended in the order arcdps would write
+// them, which is only nearly sorted by time.
 func genLog(o genOptions) *evtc.Log {
 	r := rand.New(rand.NewPCG(o.seed, o.seed^0x9e3779b97f4a7c15))
 	b := newLog()
@@ -328,8 +329,16 @@ func genLog(o genOptions) *evtc.Log {
 			}
 		}
 		if activeAdd != 0 && t-addSpawned >= 8000 {
+			inst := uint16(600 + (nextAdd-1)%5)
+			if len(players) > 0 {
+				// The addon names the add by an address no table lists,
+				// and the last player under the instance id and master of
+				// the add.
+				b.addonHeal(evtc.Event{Time: b.at(t), SrcAgent: 0x7d1, SrcInstanceID: inst, SrcMasterInstanceID: 100, DstAgent: players[0], SkillID: strikes[3], Value: -250})
+				b.addonHeal(evtc.Event{Time: b.at(t), SrcAgent: players[0], DstAgent: players[len(players)-1], DstInstanceID: inst, DstMasterInstanceID: 100, SkillID: strikes[3], Value: -250})
+			}
 			if nextAdd%2 == 0 {
-				b.stateByInst(t, uint16(600+(nextAdd-1)%5), evtc.StateDespawn)
+				b.stateByInst(t, inst, evtc.StateDespawn)
 			} else {
 				b.state(t, activeAdd, evtc.StateDespawn)
 			}

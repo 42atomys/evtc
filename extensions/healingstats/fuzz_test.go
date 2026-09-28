@@ -27,8 +27,9 @@ func FuzzDecode(f *testing.F) {
 	b.heal(3700, addrAlpha, addrBravo, skillHeal, 900, fromSrc)
 	b.castStop(4000, addrAlpha, skillHeal, 500)
 	b.heal(4200, 0, addrAlpha, 4242, 10, fromDst)
+	b.add(signed(evtc.Event{Time: b.at(4300), SrcAgent: 0x7d1, SrcInstanceID: 77, SrcMasterInstanceID: instBravo, DstAgent: addrAlpha, SkillID: skillHeal, Value: -40, IsOffcycle: fromSrc, IsStateChange: evtc.StateExtensionCombat}))
 	l := b.build(5000)
-	f.Add(encodeEvents(l.Events[len(l.Events)-14:]))
+	f.Add(encodeEvents(l.Events[len(l.Events)-15:]))
 	f.Add(encodeEvents(l.Events[len(l.Events)-3:]))
 
 	f.Fuzz(func(t *testing.T, data []byte) {

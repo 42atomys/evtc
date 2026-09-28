@@ -305,6 +305,43 @@ func TestWithoutStats(t *testing.T) {
 	}
 }
 
+func TestMasterFromRecords(t *testing.T) {
+	const mech, instMech = 0x7d1, 77
+	b := fixture()
+	b.register(0, "2.19rc2", 2)
+	// Bravo shares the heals of a mech the recording client does not
+	// track. The first master a record names for it counts.
+	b.add(signed(evtc.Event{Time: b.at(1000), SrcAgent: mech, SrcInstanceID: instMech, SrcMasterInstanceID: instBravo, DstAgent: addrCharlie, SkillID: skillHeal, Value: -100, IsOffcycle: fromSrc, IsStateChange: evtc.StateExtensionCombat}))
+	b.add(signed(evtc.Event{Time: b.at(1500), SrcAgent: mech, SrcInstanceID: instMech, SrcMasterInstanceID: instAlpha, DstAgent: addrCharlie, SkillID: skillHeal, Value: -50, IsOffcycle: fromSrc, IsStateChange: evtc.StateExtensionCombat}))
+	b.heal(2000, addrBravo, addrCharlie, skillHeal, 300, fromSrc)
+	// A record naming Charlie under the instance id and master of the pet
+	// gives Charlie no master.
+	b.add(signed(evtc.Event{Time: b.at(3000), SrcAgent: addrBravo, DstAgent: addrCharlie, DstInstanceID: instPet, DstMasterInstanceID: instAlpha, SkillID: skillHeal, Value: -20, IsOffcycle: fromSrc, IsStateChange: evtc.StateExtensionCombat}))
+	s := mustBuild(t, b.build(10000))
+	alpha, bravo, charlie := player(t, s, addrAlpha), player(t, s, addrBravo), player(t, s, addrCharlie)
+	m := player(t, s, mech)
+
+	if m.Raw != nil || m.Master != nil || m.InstanceID != instMech || s.Timeline.AgentAt(instMech, time.Second) != nil || len(bravo.Minions) != 0 {
+		t.Errorf("mech = %+v, minions of Bravo %v", m.Agent, bravo.Minions)
+	}
+	if charlie.Master != nil || charlie.master != nil || charlie.Recorded {
+		t.Errorf("Charlie has the master %v or %v, recorded %v", charlie.Master, charlie.master, charlie.Recorded)
+	}
+	if h := s.Heals().First(); h.Src != m || h.Credited() != bravo || !h.creditedTo(who{one: bravo.Agent}) || h.creditedTo(who{one: alpha.Agent}) {
+		t.Errorf("first heal by %v is credited to %v", h.Src, h.Credited())
+	}
+	if m.Heals().Count() != 2 || bravo.Heals().Count() != 2 || bravo.HealsCredited().Count() != 4 || bravo.HealsCredited().Amount() != 470 || s.Heals().CreditedTo(bravo).Count() != 4 || alpha.HealsCredited().Count() != 0 {
+		t.Errorf("mech %d heals, Bravo %d and %d credited for %d", m.Heals().Count(), bravo.Heals().Count(), bravo.HealsCredited().Count(), bravo.HealsCredited().Amount())
+	}
+	if shares := s.Heals().PerAgent(); len(shares) != 1 || shares[0].Agent != bravo || shares[0].Heals.Count() != 4 {
+		t.Errorf("PerAgent = %v", shares)
+	}
+	if !m.Recorded || !bravo.Recorded || len(s.Recorded) != 2 {
+		t.Errorf("mech recorded %v, Bravo %v, recorded %v", m.Recorded, bravo.Recorded, s.Recorded)
+	}
+	checkInvariants(t, s)
+}
+
 func TestResolveSharedAddresses(t *testing.T) {
 	b := fixture()
 	b.register(0, "2.19rc2", 2)

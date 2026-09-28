@@ -69,17 +69,16 @@ type Heal struct {
 }
 
 // Credited returns the agent credited for the heal: the master of a
-// minion source, otherwise the source itself.
-func (h *Heal) Credited() *Agent {
-	if m := h.Src.Master; m != nil {
-		return h.Src.Stats.byAgent[m]
-	}
-	return h.Src
-}
+// minion source, otherwise the source itself. The master of a source
+// arcdps does not list comes from the records.
+func (h *Heal) Credited() *Agent { return h.Src.owner() }
 
 // creditedTo reports whether the source of the heal or its master is one
 // of the agents of w.
-func (h *Heal) creditedTo(w who) bool { return w.is(h.Src.Agent) || w.is(h.Src.Master) }
+func (h *Heal) creditedTo(w who) bool {
+	a := h.Src
+	return w.is(a.Agent) || w.is(a.Master) || (a.master != nil && w.is(a.master.Agent))
+}
 
 // Self reports whether the agent healed itself.
 func (h *Heal) Self() bool { return h.Src == h.Dst }

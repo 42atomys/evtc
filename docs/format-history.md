@@ -345,6 +345,18 @@ on 2023-12-16; 2021-12-14 patches a skill id error of the release before.
 the event was created. G3 logs are only nearly sorted and nothing in the
 sources says older ones do better.
 
+From 2026-09-20 the low bit tells where the event comes from: the time is
+even for an event created from a server message, odd for one the client
+creates, so it can be 1 ms off the moment the event was created. Measured
+on the 17 logs of build 20260920: strikes, casts, buff applications and
+removals, life states, effects, missiles and teleports are even in 97 to
+100% of cases; positions, velocity, facing, health, markers, `TICK`
+events, targetable changes and stealth changes are odd in 98 to 100%;
+buff ticks are odd in 77 to 88%, team changes in half. Most exceptions
+share their time with another event of the same agent: the position
+arcdps writes with a teleport has the even time of the teleport. How
+arcdps sets the bit is open question 16.
+
 ### File names and compression
 
 `.evtc` raw. Optional zip through PowerShell from 2017-02-15, named
@@ -996,6 +1008,7 @@ hook, and the shard id joins a tooltip.
 | 07-08 | max health of 1 on agents without health, fixed                                                                                                                                                                                                                                           |
 | 08-11 | 85, 86; player address from a pseudo account value                                                                                                                                                                                                                                        |
 | 09-15 | 87; ping in `TICK`; `JUMP` was not written until now; `WVWTEAMS` moved to the end of the log; garbage position events maybe fixed; gadget pseudo ids no longer read uninitialized data; in logs outside instances, removals and cast ends of outsiders logged when they concern the squad |
+| 09-20 | 88; even times for the events created from a server message, odd for the others                                                                                                                                                                                                           |
 
 ## Build thresholds
 
@@ -1005,7 +1018,7 @@ kind is listed only when it changes how something else is read: its
 presence in a log is enough otherwise. A release date stands for its
 build and README builds are marked. What is marked "measured" comes from
 the logs, not from the sources. On the logs measured the header is a
-release date, now and then the day after, and for 5 builds out of 48 a
+release date, now and then the day after, and for 5 builds out of 49 a
 date without a changelog entry (see the introduction), so a header dated
 the day after a row marked "this one build" can be that build or the fix
 of the next day. The README builds show the other direction: a build
@@ -1086,6 +1099,7 @@ slightly older than a release can already behave the new way.
 | 20260701        | this one build writes a skill table of one row and no buff or skill definition (measured)                                                                                  |
 | 20260702        | the custom skills of arcdps have no row in the skill table (measured)                                                                                                      |
 | 20260915        | ping in `TICK`; half of the teleports without a target (measured)                                                                                                          |
+| 20260920        | even time for an event created from a server message, odd for the others                                                                                                   |
 
 ## What the module assumes
 
@@ -1128,6 +1142,14 @@ slightly older than a release can already behave the new way.
   team 4, emote 5, transformation 6.
 - A `TELEPORT` without a target is no position sample: it breaks the next
   one.
+- Times are read as written, low bit included, and no link the builder
+  makes depends on that bit. Measured: with the bit cleared, which keeps
+  the events of each 2 ms window in their file order, the 17 logs of
+  build 20260920 make the same links. Moved to the parity of 20260920 in
+  any of the four ways of open question 16, the times of the 48 logs of
+  build 20260915 change no link either: each hit keeps its cast (526,514
+  hits), each cast its stop and each stack its removal; fewer than ten
+  position samples swap with a neighbour.
 - `ENTERCOMBAT` without profession is tolerated.
 - The 10,565 logs measured from build 20240613 on build without an
   invariant failing, and each of the 5,682 G3 ones builds the same graph
@@ -1353,6 +1375,14 @@ narrowed 5, 7, 9, 13 and 15; most of the rest needs logs older than
     pads of kind 18, `dst_agent` of kind 10? They do on the logs
     measured, which hold only 8 logs older than 20240613, all of build
     20230114.
+16. How does arcdps 20260920 give a time its parity? The times of build
+    20260915 can be moved to the parity of their kind in four ways,
+    server times and client times each up or down. The four give 6,700
+    to 7,600 pairs per million events where a client event and a server
+    event sit next to each other in the file and the second is 1 ms
+    earlier than the first. The 17 logs of build 20260920 have none,
+    team changes aside, so the release may also have changed when a time
+    is taken or the order events are written in.
 
 ## Proposed split
 

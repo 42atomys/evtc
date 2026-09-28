@@ -9,7 +9,8 @@ import (
 // genLog generates a deterministic synthetic log with the events of the
 // addon: Alpha records it, Bravo shares its stats, so the heals between
 // them are written twice, Charlie does not, and the pet of Alpha heals as
-// well. Alpha casts its healing skill every two seconds.
+// well, as does a mech of Bravo the recording client does not track. Alpha
+// casts its healing skill every two seconds.
 func genLog(seed uint64, seconds int) *evtc.Log {
 	r := rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))
 	b := fixture()
@@ -21,6 +22,10 @@ func genLog(seed uint64, seconds int) *evtc.Log {
 		if t%2000 == 0 {
 			b.castStart(t, addrAlpha, addrBravo, skillHeal, 500)
 			b.castStop(t+500, addrAlpha, skillHeal, 500)
+		}
+		if t%5000 == 0 {
+			// The addon names the mech by an address no table lists.
+			b.add(signed(evtc.Event{Time: b.at(t), SrcAgent: 0x7d1, SrcInstanceID: 77, SrcMasterInstanceID: instBravo, DstAgent: addrBravo, SkillID: skillHeal, Value: -120, IsOffcycle: fromSrc, IsStateChange: evtc.StateExtensionCombat}))
 		}
 		if r.IntN(2) == 0 {
 			continue

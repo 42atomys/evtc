@@ -50,6 +50,8 @@ func FuzzEvents(f *testing.F) {
 	b.defianceState(1000, addrAdd, DefianceActive)
 	b.minionHit(1500, addrPet, addrBoss, instP1, skillHeat, 50)
 	b.legacyEffect(1200, addrBoss, addrP1, 900, 7, 4000, Vec3{}, [3]int16{}, false)
+	b.addonHeal(evtc.Event{Time: b.at(1600), SrcAgent: 0x7d1, SrcInstanceID: instAdd, SrcMasterInstanceID: instP1, DstAgent: addrP2, DstInstanceID: instPet, DstMasterInstanceID: instP1, SkillID: skillHeat, Value: -300})
+	b.stateByInst(1700, instAdd, evtc.StateDespawn)
 	l := b.build(5000)
 	f.Add(encodeEvents(l.Events[1:]))
 	f.Add(encodeEvents(l.Events[len(l.Events)-3:]))

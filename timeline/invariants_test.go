@@ -1,7 +1,6 @@
 package timeline
 
 import (
-	"cmp"
 	"math/rand/v2"
 	"slices"
 	"strconv"
@@ -321,6 +320,10 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 		if a.Master == tl.Unknown {
 			fail("%v has the Unknown sentinel as master", a)
 		}
+		if a.Kind == KindPlayer && a.Master != nil {
+			fail("the player %v has the master %v", a, a.Master)
+		}
+		checkNaming(tb, tl, a)
 	}
 
 	all := tl.Hits().All()
@@ -644,6 +647,73 @@ func checkInvariants(tb testing.TB, tl *Timeline) {
 	}
 }
 
+// checkNaming verifies that the instance id of an agent, its master and
+// the events written without address it was given come from the events of
+// arcdps.
+func checkNaming(tb testing.TB, tl *Timeline, a *Agent) {
+	tb.Helper()
+	if a == tl.Unknown {
+		return
+	}
+	var asSource []uint16
+	// named is set when an event of arcdps names the agent under its
+	// instance id, known when one names it under any, addon when an
+	// extension names it under its own.
+	named, known, addon := false, false, false
+	owned := a.Master == nil
+	masters := func(id uint16, t time.Duration) bool {
+		return id != 0 && tl.AgentAt(id, t) == a.Master
+	}
+	for _, e := range a.events {
+		k := kindOf(tl, e)
+		if k == evtc.StateExtensionCombat {
+			addon = addon || (e.SrcAgent != 0 && e.SrcInstanceID == a.InstanceID && tl.Agent(e.SrcAgent) == a) ||
+				(e.DstAgent != 0 && e.DstInstanceID == a.InstanceID && tl.Agent(e.DstAgent) == a)
+			continue
+		}
+		t := tl.TimeOf(e)
+		switch {
+		case !srcIsAgent(k):
+		case e.SrcAgent == 0:
+			// Written without address: a is the agent of the instance id.
+			owned = owned || (e.SrcInstanceID != 0 && tracksAgent(k) && masters(e.SrcMasterInstanceID, t))
+		case tl.AgentOf(e.SrcAgent, e.SrcInstanceID) == a:
+			if !slices.Contains(asSource, e.SrcInstanceID) {
+				asSource = append(asSource, e.SrcInstanceID)
+			}
+			named = named || e.SrcInstanceID == a.InstanceID
+			known = known || e.SrcInstanceID != 0
+			owned = owned || masters(e.SrcMasterInstanceID, t)
+		}
+		if addr, ok := dstOf(tl, e); ok && addr != 0 && tl.AgentOf(addr, e.DstInstanceID) == a {
+			named = named || e.DstInstanceID == a.InstanceID
+			known = known || e.DstInstanceID != 0
+			owned = owned || masters(e.DstMasterInstanceID, t)
+		}
+	}
+	// An instance id only an extension gives belongs to an agent no table
+	// lists, and stays out of AgentAt.
+	switch found := slices.Contains(tl.byInst[a.InstanceID], a); {
+	case a.InstanceID == 0:
+	case named:
+		if !found {
+			tb.Errorf("%v is not among the agents of the instance id %d", a, a.InstanceID)
+		}
+	case a.Raw != nil || known || !addon:
+		tb.Errorf("%v has the instance id %d, which no event names it under", a, a.InstanceID)
+	case found:
+		tb.Errorf("%v, which an extension alone names, is among the agents of the instance id %d", a, a.InstanceID)
+	}
+	if !owned {
+		tb.Errorf("%v has the master %v, which no event of arcdps gives it", a, a.Master)
+	}
+	for _, e := range a.events {
+		if k := kindOf(tl, e); srcIsAgent(k) && e.SrcAgent == 0 && e.SrcInstanceID != 0 && tracksAgent(k) && !slices.Contains(asSource, e.SrcInstanceID) {
+			tb.Errorf("%v holds the %v written at %v for the instance id %d, which no event of arcdps names it under", a, k, tl.TimeOf(e), e.SrcInstanceID)
+		}
+	}
+}
+
 // checkSeries verifies that samples are sorted.
 func checkSeries[T any](tb testing.TB, what string, s Series[T]) {
 	tb.Helper()
@@ -857,23 +927,9 @@ func bruteUptime(stacks []*BuffStack, iv Interval) time.Duration {
 			clipped = append(clipped, c)
 		}
 	}
-	slices.SortFunc(clipped, func(a, b Interval) int { return cmp.Compare(a.Start, b.Start) })
 	var total time.Duration
-	var cur Interval
-	for i, c := range clipped {
-		if i == 0 {
-			cur = c
-			continue
-		}
-		if c.Start <= cur.End {
-			cur.End = max(cur.End, c.End)
-			continue
-		}
-		total += cur.Duration()
-		cur = c
-	}
-	if len(clipped) > 0 {
-		total += cur.Duration()
+	for _, c := range Compact(clipped) {
+		total += c.Duration()
 	}
 	return total
 }
@@ -921,6 +977,16 @@ func kindOf(tl *Timeline, e *evtc.Event) evtc.StateChange {
 		return e.IsStateChange
 	}
 	return legacyKind(e)
+}
+
+// dstOf returns the address an event names as its destination, whatever
+// the format of its log.
+func dstOf(tl *Timeline, e *evtc.Event) (addr uint64, ok bool) {
+	b := &builder{tl: tl}
+	if !tl.Has(evtc.CapabilityTypedEvents) {
+		b.kinds = []evtc.StateChange{}
+	}
+	return b.dstAddr(kindOf(tl, e), e)
 }
 
 // onGround reports whether the creation event of an effect places it on

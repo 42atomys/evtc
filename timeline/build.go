@@ -31,6 +31,9 @@ const MoveGap = 1500 * time.Millisecond
 type agentCounts struct {
 	seen        bool
 	first, last uint64
+	// addon is set while the instance id of the agent comes from an
+	// extension alone.
+	addon bool
 	// fought is set when the agent exchanged hits with a player, at
 	// foughtAt.
 	fought   bool
@@ -386,6 +389,15 @@ type foldedEntry struct {
 	at          uint64
 }
 
+// holder returns the agent that claimed the instance id, or the last agent
+// to appear, without claiming an entry as pick does.
+func (s *sharedAddr) holder(inst uint16) *Agent {
+	if a := s.owner[inst]; a != nil {
+		return a
+	}
+	return s.cur
+}
+
 // pick returns the agent an event with the given instance id belongs to.
 // Once every entry is claimed, further instance ids go to the last agent.
 func (s *sharedAddr) pick(inst uint16, at uint64) *Agent {
@@ -530,8 +542,8 @@ func (b *builder) dropUnclaimed() {
 
 // resolve returns the agent for an address, synthesizing one for addresses
 // missing from the agent table. The instance id tells apart the table
-// entries that share an address.
-func (b *builder) resolve(addr uint64, inst uint16, at uint64) *Agent {
+// entries that share an address; one an extension wrote claims no entry.
+func (b *builder) resolve(addr uint64, inst uint16, at uint64, ext bool) *Agent {
 	tl := b.tl
 	if addr == 0 {
 		return tl.Unknown
@@ -539,6 +551,9 @@ func (b *builder) resolve(addr uint64, inst uint16, at uint64) *Agent {
 	addr = tl.canonical(addr)
 	if a := tl.byAddr[addr]; a != nil {
 		if s := b.shared[addr]; s != nil {
+			if ext {
+				return s.holder(inst)
+			}
 			return s.pick(inst, at)
 		}
 		return a
@@ -690,8 +705,11 @@ func (b *builder) ensureBuff(id uint32) *Buff {
 	return buff
 }
 
-// see records that an agent was involved in an event.
-func (b *builder) see(a *Agent, e *evtc.Event, inst uint16) {
+// see records that an agent was involved in an event, written by an
+// extension when ext is set. An extension may write the address of an
+// agent next to the instance id of another: the instance id it writes
+// counts only for an agent no table lists, until arcdps gives one.
+func (b *builder) see(a *Agent, e *evtc.Event, inst uint16, ext bool) {
 	c := b.cnt(a)
 	if !c.seen || e.Time < c.first {
 		c.first = e.Time
@@ -701,8 +719,14 @@ func (b *builder) see(a *Agent, e *evtc.Event, inst uint16) {
 	}
 	c.seen = true
 	c.events++
-	if inst != 0 && a.InstanceID == 0 && a != b.tl.Unknown {
-		a.InstanceID = inst
+	switch {
+	case inst == 0 || a == b.tl.Unknown:
+	case ext:
+		if a.InstanceID == 0 && a.Raw == nil {
+			a.InstanceID, c.addon = inst, true
+		}
+	case a.InstanceID == 0 || c.addon:
+		a.InstanceID, c.addon = inst, false
 	}
 }
 
@@ -739,30 +763,31 @@ func (b *builder) scan() {
 	}
 	openMissile := map[uint32]int{}
 	b.extCombat = map[uint32]int{}
-	// byInst is the agent last seen with each instance id: arcdps writes
+	// byInst is the agent arcdps saw last with each instance id: it writes
 	// the despawn (and a few other state events) of minions and NPCs with
 	// src_agent 0 and only the instance id set.
 	byInst := make([]*Agent, 1<<16)
 
 	for i, e := range events {
 		k := b.kind(i)
+		ext := k == evtc.StateExtensionCombat
 		var src, dst *Agent
 		if srcIsAgent(k) {
-			src = b.resolve(e.SrcAgent, e.SrcInstanceID, e.Time)
+			src = b.resolve(e.SrcAgent, e.SrcInstanceID, e.Time, ext)
 			if src == tl.Unknown && e.SrcAgent == 0 && e.SrcInstanceID != 0 && tracksAgent(k) {
 				if a := byInst[e.SrcInstanceID]; a != nil {
 					src = a
 				}
 			}
-			b.see(src, e, e.SrcInstanceID)
-			if src != tl.Unknown && e.SrcInstanceID != 0 {
+			b.see(src, e, e.SrcInstanceID, ext)
+			if src != tl.Unknown && e.SrcInstanceID != 0 && !ext {
 				byInst[e.SrcInstanceID] = src
 			}
 		}
 		if addr, ok := b.dstAddr(k, e); ok {
-			dst = b.resolve(addr, e.DstInstanceID, e.Time)
+			dst = b.resolve(addr, e.DstInstanceID, e.Time, ext)
 			if dst != src {
-				b.see(dst, e, e.DstInstanceID)
+				b.see(dst, e, e.DstInstanceID, ext)
 			}
 		}
 		b.srcs[i], b.dsts[i] = src, dst
@@ -1147,17 +1172,18 @@ func (b *builder) allocateAgents() {
 		a.GadgetAnimations = carve(&gadgetAnims, n.gadgetAnims)
 	}
 
-	// Agents by instance id, from one arena of pointers.
+	// Agents by instance id, from one arena of pointers. An instance id
+	// only an extension gives is left out.
 	perInst := map[uint16]int{}
 	for _, a := range agents {
-		if a.InstanceID != 0 {
+		if a.InstanceID != 0 && !b.cnt(a).addon {
 			perInst[a.InstanceID]++
 		}
 	}
 	tl.byInst = make(map[uint16][]*Agent, len(perInst))
 	instRefs := make([]*Agent, len(agents))
 	for _, a := range agents {
-		if a.InstanceID == 0 {
+		if a.InstanceID == 0 || b.cnt(a).addon {
 			continue
 		}
 		list, ok := tl.byInst[a.InstanceID]
@@ -1280,15 +1306,20 @@ func (b *builder) fill() {
 	for i, e := range tl.events {
 		src, dst := b.srcs[i], b.dsts[i]
 		t := tl.rel(e.Time)
+		k := b.kind(i)
+		// Masters come from the events of arcdps alone.
+		srcMaster, dstMaster := e.SrcMasterInstanceID, e.DstMasterInstanceID
+		if k == evtc.StateExtensionCombat {
+			srcMaster, dstMaster = 0, 0
+		}
 		if src != nil {
 			src.events = append(src.events, e)
-			b.resolveMaster(src, e.SrcMasterInstanceID, t)
+			b.resolveMaster(src, srcMaster, t)
 		}
 		if dst != nil && dst != src {
 			dst.events = append(dst.events, e)
-			b.resolveMaster(dst, e.DstMasterInstanceID, t)
+			b.resolveMaster(dst, dstMaster, t)
 		}
-		k := b.kind(i)
 		if src == tl.Unknown && tracksAgent(k) {
 			continue
 		}
@@ -1515,8 +1546,9 @@ func tracksAgent(k evtc.StateChange) bool {
 func (b *builder) resolveMaster(a *Agent, masterInst uint16, t time.Duration) {
 	// Events without a source may still carry a master instance id (a
 	// minion despawning, for one); the Unknown sentinel never gets a
-	// master, or every unknown hit would be credited to that agent.
-	if masterInst == 0 || a.Master != nil || a == b.tl.Unknown {
+	// master, or every unknown hit would be credited to that agent. A
+	// player gets none either.
+	if masterInst == 0 || a.Master != nil || a == b.tl.Unknown || a.Kind == KindPlayer {
 		return
 	}
 	if m := b.tl.AgentAt(masterInst, t); m != nil && m != a && m != b.tl.Unknown {

@@ -1,6 +1,7 @@
 package timeline
 
 import (
+	"cmp"
 	"slices"
 	"time"
 )
@@ -95,6 +96,26 @@ func (iv Interval) Every(d time.Duration) []Interval {
 	out := make([]Interval, 0, (iv.Duration()+d-1)/d)
 	for start := iv.Start; start < iv.End; start += d {
 		out = append(out, Interval{Start: start, End: min(start+d, iv.End)})
+	}
+	return out
+}
+
+// Compact merges the intervals of ivs that touch or overlap and returns
+// the result in time order. An interval whose End is before its Start
+// covers nothing and is dropped. Compact works in place: ivs is sorted and
+// overwritten, and the result is a prefix of it.
+func Compact(ivs []Interval) []Interval {
+	slices.SortFunc(ivs, func(a, b Interval) int { return cmp.Compare(a.Start, b.Start) })
+	out := ivs[:0]
+	for _, iv := range ivs {
+		if iv.End < iv.Start {
+			continue
+		}
+		if n := len(out); n > 0 && iv.Start <= out[n-1].End {
+			out[n-1] = out[n-1].Union(iv)
+			continue
+		}
+		out = append(out, iv)
 	}
 	return out
 }

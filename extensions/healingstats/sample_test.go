@@ -103,8 +103,8 @@ func TestSampleRankings(t *testing.T) {
 	}
 	pov := tl.POV.Ref()
 	for h := range merged.Seq() {
-		local := (h.Event.IsOffcycle&flagFromSrc != 0 && credited(h.Src.Agent) == pov) || (h.Event.IsOffcycle&flagFromDst != 0 && credited(h.Dst.Agent) == pov)
-		peer := (h.PeerEvent.IsOffcycle&flagFromSrc != 0 && credited(h.Src.Agent) == pov) || (h.PeerEvent.IsOffcycle&flagFromDst != 0 && credited(h.Dst.Agent) == pov)
+		local := (h.Event.IsOffcycle&flagFromSrc != 0 && h.Src.owner().Agent == pov) || (h.Event.IsOffcycle&flagFromDst != 0 && h.Dst.owner().Agent == pov)
+		peer := (h.PeerEvent.IsOffcycle&flagFromSrc != 0 && h.Src.owner().Agent == pov) || (h.PeerEvent.IsOffcycle&flagFromDst != 0 && h.Dst.owner().Agent == pov)
 		// The record of the recording player's client is kept; between two
 		// squad members sharing their stats, the earlier record is.
 		if peer || !h.SrcRecorded || !h.DstRecorded || (!local && h.Event.Time > h.PeerEvent.Time) {

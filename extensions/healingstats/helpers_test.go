@@ -63,10 +63,12 @@ func fixture() *logBuilder {
 	b.add(evtc.Event{Time: rawEpoch, SrcAgent: addrAlpha, IsStateChange: evtc.StatePointOfView})
 	b.add(evtc.Event{Time: rawEpoch, SrcAgent: 15375, DstAgent: addrBoss, IsStateChange: evtc.StateLogNPCUpdate})
 	// Every agent is tracked from the start to the end of the log, so that
-	// masters resolve at any instant.
-	for _, a := range []uint64{addrAlpha, addrBravo, addrCharlie, addrPet, addrBoss} {
+	// masters resolve at any instant, and arcdps names the master of the
+	// pet.
+	for _, a := range []uint64{addrAlpha, addrBravo, addrCharlie, addrBoss} {
 		b.state(0, a, evtc.StateEnterCombat)
 	}
+	b.add(evtc.Event{Time: b.at(0), SrcAgent: addrPet, SrcMasterInstanceID: instAlpha, IsStateChange: evtc.StateEnterCombat})
 	return b
 }
 

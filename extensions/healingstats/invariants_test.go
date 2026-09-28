@@ -98,7 +98,7 @@ func checkInvariants(tb testing.TB, s *Stats) {
 		if c := h.Cast; c != nil && (c.Caster != h.Src.Agent || c.Skill != h.Skill || c.Interval.Start > h.Time) {
 			fail("heal %d has an inconsistent cast: %+v", i, c)
 		}
-		if cr := h.Credited(); cr == nil || (cr != h.Src && cr.Agent != h.Src.Master) || !h.creditedTo(who{one: cr.Agent}) {
+		if cr := h.Credited(); cr == nil || (cr != h.Src && cr.Agent != h.Src.Master && cr != h.Src.master) || !h.creditedTo(who{one: cr.Agent}) {
 			fail("heal %d is credited to %v", i, cr)
 		}
 		if h.SrcRecorded && h.Src != s.Unknown && !(h.Src.Recorded && h.Credited().Recorded) {
@@ -126,6 +126,17 @@ func checkInvariants(tb testing.TB, s *Stats) {
 		exact("heals of "+a.String(), len(a.heals), cap(a.heals))
 		exact("heals taken by "+a.String(), len(a.healsTaken), cap(a.healsTaken))
 		exact("credited heals of "+a.String(), len(a.healsCredited), cap(a.healsCredited))
+		exact("agents given to "+a.String(), len(a.adopted), cap(a.adopted))
+		for _, m := range a.adopted {
+			if m.master != a {
+				fail("%v is given to %v and has the master %v", m, a, m.master)
+			}
+		}
+		// The records give a master to the agents arcdps does not list, and
+		// to those alone.
+		if m := a.master; m != nil && (a == s.Unknown || a.Raw != nil || a.Master != nil || m == a || m == s.Unknown || !slices.Contains(m.adopted, a) || !recordNames(s, a, m)) {
+			fail("%v has the master %v, which no record gives it", a, m)
+		}
 		for j, h := range a.heals {
 			if h.Src != a || (j > 0 && h.Time < a.heals[j-1].Time) {
 				fail("heal %d of %v is inconsistent: %+v", j, a, h)
@@ -170,6 +181,23 @@ func checkInvariants(tb testing.TB, s *Stats) {
 			j++
 		}
 	}
+}
+
+// recordNames reports whether a record of the addon names a with the
+// master m.
+func recordNames(s *Stats, a, m *Agent) bool {
+	tl := s.Timeline
+	for e := range s.Extension.Events().Seq() {
+		t := tl.TimeOf(e)
+		src, dst := s.parties(e)
+		if src == a.Agent && e.SrcMasterInstanceID != 0 && tl.AgentAt(e.SrcMasterInstanceID, t) == m.Agent {
+			return true
+		}
+		if dst == a.Agent && e.DstMasterInstanceID != 0 && tl.AgentAt(e.DstMasterInstanceID, t) == m.Agent {
+			return true
+		}
+	}
+	return false
 }
 
 // names reports whether a is the agent a record names: the agent of its
