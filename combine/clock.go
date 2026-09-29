@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/42atomys/evtc"
+	"github.com/42atomys/evtc/timeline"
 )
 
 // MinStrikes is the number of strikes two recordings must share, dated
@@ -12,6 +13,17 @@ import (
 // fight share thousands; a few seconds on a training golem may not hold
 // twenty.
 const MinStrikes = 20
+
+// MinTicks is the number of ticks of the server two recordings of one
+// instance must both hold for their clocks to be set on each other when
+// they share fewer than MinStrikes strikes: two recorders too far apart to
+// see the same creatures. arcdps writes the tick once a second since build
+// 20260701.
+const MinTicks = 20
+
+// startTolerance is how far the clocks of the server may be from what the
+// strikes of two recordings tell: the log holds them to the second.
+const startTolerance = 5 * time.Second
 
 // strike names a strike by what every client writes alike.
 type strike struct {
@@ -62,4 +74,114 @@ func offsetOf(a, b map[strike][]time.Duration) (time.Duration, int) {
 		return 0, 0
 	}
 	return together[len(together)/2].Round(time.Millisecond), len(together)
+}
+
+// ticks lists the TICK events of a recording: the tick of the server each
+// one names and its time. The tick counts from the start of the instance
+// and is the same for every client of the instance; a client may name the
+// tick before or after the one another client names at the same second.
+type ticks struct {
+	tick []int64
+	at   []time.Duration
+}
+
+// ticksAnEvent is the number of ticks of the server between two TICK
+// events: one a second, 25 ticks of 40 ms.
+const ticksAnEvent = 25
+
+// ticksOf reads the ticks of a recording, in their order; a tick that does
+// not follow the one before is left out.
+func ticksOf(r *recording) ticks {
+	var s ticks
+	for i := range r.tl.Log.Events {
+		e := &r.tl.Log.Events[i]
+		if e.IsStateChange != evtc.StateTick {
+			continue
+		}
+		if tick := int64(e.SrcAgent); len(s.tick) == 0 || tick > s.tick[len(s.tick)-1] {
+			s.tick = append(s.tick, tick)
+			s.at = append(s.at, r.tl.TimeOf(e))
+		}
+	}
+	return s
+}
+
+// timeAt returns the time of a tick of the server on the clock of the
+// recording: the time of its TICK event, or the one between the two TICK
+// events around it, and whether the recording covers the tick.
+func (s ticks) timeAt(tick int64) (time.Duration, bool) {
+	i, found := slices.BinarySearch(s.tick, tick)
+	if found {
+		return s.at[i], true
+	}
+	if i == 0 || i == len(s.tick) {
+		return 0, false
+	}
+	span := s.tick[i] - s.tick[i-1]
+	if span > 2*ticksAnEvent {
+		return 0, false
+	}
+	return s.at[i-1] + time.Duration(tick-s.tick[i-1])*(s.at[i]-s.at[i-1])/time.Duration(span), true
+}
+
+// tickOffset returns the time of b minus the time of a for the same tick
+// of the server, the median over the ticks of a that b covers, and how
+// many they are.
+func tickOffset(a, b ticks) (time.Duration, int) {
+	var gaps []time.Duration
+	for i, tick := range a.tick {
+		if at, ok := b.timeAt(tick); ok {
+			gaps = append(gaps, at-a.at[i])
+		}
+	}
+	if len(gaps) == 0 {
+		return 0, 0
+	}
+	slices.Sort(gaps)
+	return gaps[len(gaps)/2].Round(time.Millisecond), len(gaps)
+}
+
+// socketOf returns the socket of the server a recording names in its
+// instance start, 0 when it names none.
+func socketOf(r *recording) uint32 {
+	for i := range r.tl.Log.Events {
+		if e := &r.tl.Log.Events[i]; e.IsStateChange == evtc.StateInstanceStart {
+			return uint32(e.Value)
+		}
+	}
+	return 0
+}
+
+// sameInstance reports whether two recordings were made in the same
+// instance of the map: they name the same socket of the server and an
+// instance that started at the same time. Two instances of one map
+// started 36 s apart at the least over the corpus measured.
+func sameInstance(a, b *recording) bool {
+	sa, sb := socketOf(a), socketOf(b)
+	if sa == 0 || sa != sb || a.tl.InstanceStart.IsZero() || b.tl.InstanceStart.IsZero() {
+		return false
+	}
+	return a.tl.InstanceStart.Sub(b.tl.InstanceStart).Abs() <= startTolerance
+}
+
+// sameStart reports whether the clocks of the server agree with an offset
+// read from the strikes: two attempts of a fight by the same squad share
+// strikes a few seconds into each, and started minutes apart. A log
+// without the time of the server tells nothing.
+func sameStart(a, b *timeline.Timeline, off time.Duration) bool {
+	if a.Start.IsZero() || b.Start.IsZero() {
+		return true
+	}
+	return (a.Start.Sub(b.Start) - off).Abs() <= startTolerance
+}
+
+// epoch returns the raw time of the zero of a timeline.
+func epoch(tl *timeline.Timeline) int64 {
+	for i := range tl.Log.Events {
+		e := &tl.Log.Events[i]
+		if timed(e.IsStateChange) && e.IsStateChange != evtc.StateExtension {
+			return int64(e.Time) - tl.TimeOf(e).Milliseconds()
+		}
+	}
+	return 0
 }
