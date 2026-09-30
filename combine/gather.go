@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/42atomys/evtc"
+	"github.com/42atomys/evtc/timeline"
 )
 
 // windows are the widths within which a message of a recording looks for
@@ -186,4 +187,180 @@ type combiner struct {
 	exts map[[56]byte]int
 
 	audit *audit
+}
+
+// raw returns the raw time of the combined log for a time on the clock of
+// the first recording.
+func (m *combiner) raw(t time.Duration) uint64 {
+	return uint64(m.recs[0].epoch + t.Milliseconds())
+}
+
+// entityAt finds the agent that carried an instance id at t: the one
+// whose events hold t, or else the closest within a second. It tells which
+// message of another recording is the same one: a client writes what an
+// agent does some milliseconds before it writes that the agent came.
+func (m *combiner) entityAt(inst uint16, t time.Duration) *entity {
+	var best *entity
+	bestDist := time.Second + 1
+	for _, x := range m.byInst[inst] {
+		for i := range x.holds {
+			iv := x.holds[i].life
+			if d := max(iv.Start-t, t-iv.End, 0); d < bestDist {
+				best, bestDist = x, d
+			}
+		}
+	}
+	return best
+}
+
+// entityHeld finds the agent a recording held under an instance id at t,
+// or left less than a second before: an agent seen, never one to come.
+func (m *combiner) entityHeld(inst uint16, t time.Duration) *entity {
+	var best *entity
+	bestDist := time.Second + 1
+	for _, x := range m.byInst[inst] {
+		for i := range x.holds {
+			iv := x.holds[i].life
+			if iv.Start > t {
+				continue
+			}
+			if d := max(t-iv.End, 0); d < bestDist {
+				best, bestDist = x, d
+			}
+		}
+	}
+	return best
+}
+
+// resolve returns the agent of the combined log an event of a recording
+// names by an address and an instance id.
+func (m *combiner) resolve(r *recording, addr uint64, inst uint16, t time.Duration) resolved {
+	var x *entity
+	var entry int32
+	if addr != 0 {
+		a := r.tl.AgentOf(addr, inst)
+		if a == nil {
+			// An address the timeline knows no agent at: the first
+			// recording keeps what it wrote, and the address means nothing
+			// among those of another one.
+			out := resolved{id: -int32(inst)}
+			if r == m.recs[0] {
+				out.addr = addr
+			}
+			return out
+		}
+		if inst == 0 && a.Player != nil {
+			// The characters of a player share their address: without
+			// instance id, the one on the field then. The players a log
+			// lists without account share none.
+			if c := a.Player.CharacterAt(t + r.off); c.Addr == a.Addr {
+				a = c.Agent
+			}
+		}
+		if r.unnamed[a] {
+			return resolved{unnamed: true}
+		}
+		x, entry = r.entity[a], r.entry[a]
+	} else if inst != 0 {
+		if x = m.entityAt(inst, t); x != nil {
+			// The entry of this recording that held the agent then.
+			best := 2 * time.Second
+			for _, a := range r.members[x] {
+				ts := t + r.off
+				if d := max(a.Lifetime.Start-ts, ts-a.Lifetime.End, 0); d < best {
+					best, entry = d, r.entry[a]
+				}
+			}
+		}
+	}
+	switch {
+	case x != nil && addr == 0:
+		// The timeline of the recording gave the event to no agent: the
+		// combined log names none either. The agent found tells which
+		// message of another recording is the same one.
+		return resolved{x: x, id: x.id, entry: entry}
+	case x != nil:
+		return resolved{x: x, id: x.id, addr: x.addr, entry: entry}
+	case inst != 0:
+		return resolved{id: -int32(inst)}
+	}
+	return resolved{}
+}
+
+// given returns the agent of the combined log for the agent the timeline
+// of a recording gave to an event. The combined log names it by its
+// address: the last agent seen with an instance id is not the same one
+// once the recordings are put together.
+func (m *combiner) given(r *recording, a *timeline.Agent) resolved {
+	x := r.entity[a]
+	if x == nil {
+		return resolved{unnamed: r.unnamed[a]}
+	}
+	return resolved{x: x, id: x.id, addr: x.addr, entry: r.entry[a]}
+}
+
+// owner returns the recording whose player plays one of the agents, the
+// first recording first, and that covers t within pad; -1 when none does.
+func (m *combiner) owner(t, pad time.Duration, xs ...*entity) int {
+	for _, x := range xs {
+		if x == nil {
+			continue
+		}
+		for ri, r := range m.recs {
+			if x.owners.has(ri) && r.span.Start-pad <= t && t <= r.span.End+pad {
+				return ri
+			}
+		}
+	}
+	return -1
+}
+
+// wearer returns the agent that wears the buff a buff event tells of.
+func wearer(k evtc.StateChange, src, dst resolved) (resolved, bool) {
+	switch k {
+	case evtc.StateBuffInitial, evtc.StateBuffApply, evtc.StateBuffChange:
+		return dst, true
+	case evtc.StateBuffRemoveSingle, evtc.StateBuffRemoveAll, evtc.StateBuffActive, evtc.StateBuffDeactive:
+		return src, true
+	}
+	return resolved{}, false
+}
+
+// startOf returns the start of the span the entry held at t when t is
+// within gain of it.
+func (x *entity) startOf(entry int32, t time.Duration) (time.Duration, bool) {
+	h := x.hold(entry)
+	if h == nil {
+		return 0, false
+	}
+	for _, iv := range h.held {
+		if t >= iv.Start && t-iv.Start <= gain {
+			return iv.Start, true
+		}
+	}
+	return 0, false
+}
+
+// started reports whether the entry had just started to hold the agent
+// at t, or its recording to record: a client writes then what the agent
+// is.
+func (x *entity) started(entry int32, t time.Duration) bool {
+	_, ok := x.startOf(entry, t)
+	return ok
+}
+
+// gained is started for an agent that came while a recording was going
+// on: the entry wrote a spawn, or its recording started after another one.
+func (x *entity) gained(entry int32, t time.Duration) bool {
+	from, ok := x.startOf(entry, t)
+	return ok && (from-x.first > sameBound || near(x.hold(entry).spawns, from))
+}
+
+// at returns the time of an event for the order of the combined log: 0
+// when its time field holds something else.
+func at(e *evtc.Event) uint64 {
+	if timed(e.IsStateChange) {
+		return e.Time
+	}
+	return 0
 }
