@@ -1,6 +1,8 @@
 package combine
 
 import (
+	"cmp"
+	"slices"
 	"time"
 
 	"github.com/42atomys/evtc"
@@ -365,6 +367,225 @@ func at(e *evtc.Event) uint64 {
 	return 0
 }
 
+// read returns the events of a recording that may go on, as the combined
+// log writes them.
+func (m *combiner) read(ri int) []cand {
+	r := m.recs[ri]
+	events := r.tl.Log.Events
+	order := make([]int, len(events))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(i, j int) int { return cmp.Compare(at(&events[i]), at(&events[j])) })
+
+	cands := make([]cand, 0, len(events))
+	claimed := map[[56]byte]int{}
+	for seq, i := range order {
+		e := events[i]
+		k := kindOf(&e, r.typed)
+		rl := ruleOf(&e, k, r.typed)
+		cd := cand{origin: int8(ri), owner: -1, seq: seq}
+		switch rl.class {
+		case classDefinition:
+			if b := e.Bytes(); ri == 0 || !m.defs[b] {
+				m.defs[b] = true
+				cd.e = e
+				cands = append(cands, cd)
+			}
+			continue
+		case classDropped:
+			continue
+		}
+		t := r.at(&e)
+		cd.t = t
+		var src, dst resolved
+		if rl.src {
+			switch a := r.given[&events[i]]; {
+			case a != nil:
+				src = m.given(r, a)
+			case e.SrcAgent == 0 && tracks(k):
+				// A state written without address of an agent the
+				// recording had not seen: that of the agent another one
+				// held then, or else the state of nobody.
+				if x := m.entityHeld(e.SrcInstanceID, t); x != nil {
+					src = resolved{x: x, id: x.id}
+				} else if e.SrcInstanceID != 0 {
+					src = resolved{id: -int32(e.SrcInstanceID)}
+				}
+			default:
+				src = m.resolve(r, e.SrcAgent, e.SrcInstanceID, t)
+			}
+		}
+		if rl.dst {
+			dst = m.resolve(r, e.DstAgent, e.DstInstanceID, t)
+		}
+		if src.unnamed || dst.unnamed {
+			continue
+		}
+
+		w := e
+		if rl.src {
+			w.SrcAgent = src.addr
+		}
+		if rl.dst {
+			w.DstAgent = dst.addr
+		}
+		w.Time = m.raw(t)
+		cd.e = w
+		cd.src, cd.dst = rl.src, rl.dst
+		if rl.class != classExtension && !rl.class.ofRecording() {
+			cd.srcOf, cd.dstOf = src.id, dst.id
+		}
+		if (k == evtc.StateTeamChange || k == evtc.StateWeaponSwap) && e.Value != 0 && src.x != nil && src.entry != 0 {
+			m.remember(r, cd, k, src)
+		}
+
+		switch rl.class {
+		case classRecording:
+			if ri > 0 {
+				continue
+			}
+			// The first recording keeps what it wrote, but for the
+			// address of an entry joined into another one.
+			cd.e = e
+			if rl.src && src.x != nil {
+				cd.e.SrcAgent = src.addr
+			}
+		case classLocal:
+			// A log that started late or stopped early leaves the others
+			// to tell.
+			if m.covered(ri, t) {
+				continue
+			}
+		case classFight:
+			cd.k, cd.pairable, cd.fight = key{kind: k}, true, true
+			switch k {
+			case evtc.StateSquadCombatStart:
+				cd.bound = -1
+			case evtc.StateSquadCombatEnd:
+				cd.bound = 1
+			default:
+				cd.k.dst, cd.k.p = dst.id, payload{e.SrcAgent}
+			}
+		case classExtension:
+			if k == evtc.StateExtension {
+				// A registration is told again when all of it but its
+				// time is.
+				b := e.Bytes()
+				p := [56]byte(b[8:])
+				if claimed[p]++; ri > 0 && claimed[p] <= m.exts[p] {
+					continue
+				}
+				m.exts[p]++
+				cd.e = e
+				cd.e.Time = w.Time
+				break
+			}
+			// Paired on everything but the time and the addresses. An
+			// extension keeps its own list of agents, and names one that
+			// left when its instance id serves again: the instance ids
+			// name the agents of the message, the addresses may not.
+			cd.k = key{kind: k, src: -int32(e.SrcInstanceID), dst: -int32(e.DstInstanceID), skill: e.SkillID,
+				p: payload{u32(e.Value)<<32 | u32(e.BuffDamage), uint64(e.OverstackValue)<<32 | uint64(e.IFF)<<24 | uint64(e.Buff)<<16 | uint64(e.IsShields)<<8 | uint64(e.IsOffcycle), trackable(&e)}}
+			cd.pairable = true
+			// An agent of the table that was there then.
+			cd.srcThere = src.x != nil && src.x.raw != nil && src.x.present(t)
+			cd.dstThere = dst.x != nil && dst.x.raw != nil && dst.x.present(t)
+		case classClient:
+			about := src
+			if rl.dst && dst.x != nil {
+				about = dst
+			}
+			if k == evtc.StateCombat {
+				// A client is told what its character deals and takes,
+				// and estimates the rest.
+				if m.owner(t, 0, src.x, dst.x) == ri {
+					break
+				}
+				// Around the bounds of the recording of that client, a
+				// tick lost is better than one told twice.
+				if m.owner(t, gain, src.x, dst.x) >= 0 {
+					continue
+				}
+			}
+			if about.x == nil {
+				// Nobody to speak for: the first recording that was
+				// going on then keeps what it wrote.
+				if m.covered(ri, t) {
+					continue
+				}
+				break
+			}
+			if rl.slot != slotNone {
+				cd.ent, cd.entry, cd.slot, cd.value = about.id, about.entry, rl.slot, rl.value(&e)
+				cd.gained = about.x.started(about.entry, t)
+				m.tell(cd)
+			}
+			if !about.x.speaks(about.entry, t) {
+				// A state told with the master of the agent goes to
+				// settle, which keeps it when no other event names the
+				// master. A state that moves is a sample of the clock of
+				// its client.
+				if rl.slot == slotNone || rl.slot.moving() || e.SrcMasterInstanceID == 0 || about.x.master == nil {
+					continue
+				}
+				cd.names = true
+			}
+		case classBound:
+			if src.x != nil {
+				cd.ent = src.id
+				within := src.x.inner(t, k == evtc.StateSpawn)
+				if k != evtc.StateSpawn && t >= src.x.until && !src.x.seen.has(ri) {
+					// The next agent of the instance id is there and
+					// this recording does not know: a leave written
+					// without address would name it.
+					was := m.raw(t)
+					t = src.x.until - time.Millisecond
+					if (m.raw(t)^was)&1 != 0 {
+						t -= time.Millisecond
+					}
+					cd.t, cd.e.Time, cd.moved, cd.clamped = t, m.raw(t), true, true
+				}
+				if within {
+					continue
+				}
+				if k == evtc.StateDespawn {
+					cd.stack = stackClosesAll
+				}
+			}
+			cd.bound = 1
+			if k == evtc.StateSpawn {
+				cd.bound = -1
+			}
+			cd.k, cd.pairable = key{kind: k, src: src.id}, true
+			if src.x != nil {
+				// A bound pairs within its span of presence.
+				cd.k.p[0] = uint64(src.x.span(t) + 1)
+			}
+		case classServer:
+			if !m.message(&cd, k, rl, &e, src, dst) {
+				continue
+			}
+		}
+		cands = append(cands, cd)
+	}
+	// A client writes a start of the squad combat when its log starts and
+	// an end when it ends, whatever the squad does then.
+	for i := range cands {
+		if c := &cands[i]; c.fight && c.bound < 0 {
+			c.ofLog = true
+			break
+		}
+	}
+	for i := len(cands) - 1; i >= 0; i-- {
+		if c := &cands[i]; c.fight && c.bound > 0 {
+			c.ofLog = true
+			break
+		}
+	}
+	return cands
+}
+
 // remember keeps what a team or a weapon set was before the first change
 // an entry tells of it: the change told backwards, to what was, from
 // nothing.
@@ -475,4 +696,15 @@ func (m *combiner) message(cd *cand, k evtc.StateChange, rl rule, e *evtc.Event,
 		}
 	}
 	return true
+}
+
+// covered reports whether a recording read before the one given was going
+// on at t.
+func (m *combiner) covered(ri int, t time.Duration) bool {
+	for _, r := range m.recs[:ri] {
+		if r.span.Contains(t) {
+			return true
+		}
+	}
+	return false
 }
