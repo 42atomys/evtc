@@ -364,3 +364,115 @@ func at(e *evtc.Event) uint64 {
 	}
 	return 0
 }
+
+// remember keeps what a team or a weapon set was before the first change
+// an entry tells of it: the change told backwards, to what was, from
+// nothing.
+func (m *combiner) remember(r *recording, cd cand, k evtc.StateChange, src resolved) {
+	sl := slotTeam
+	if k == evtc.StateWeaponSwap {
+		sl = slotWeaponSet
+	}
+	b := m.before[src.entry]
+	if b == nil {
+		b = map[slot]told{}
+		m.before[src.entry] = b
+	}
+	if _, ok := b[sl]; ok {
+		return
+	}
+	was := cd
+	was.e.DstAgent, was.e.Value = uint64(uint32(cd.e.Value)), 0
+	was.ent, was.entry, was.slot = src.id, src.entry, sl
+	if rw := ruleOf(&was.e, k, r.typed); rw.value != nil {
+		was.value = rw.value(&was.e)
+	}
+	b[sl] = told{cd.t, was}
+}
+
+// message fills the candidate of a message of the server, and reports
+// whether it goes on.
+func (m *combiner) message(cd *cand, k evtc.StateChange, rl rule, e *evtc.Event, src, dst resolved) bool {
+	t := cd.t
+	cd.k = key{kind: k, p: rl.key(e)}
+	if rl.keySrc {
+		cd.k.src = src.id
+	}
+	if rl.keyDst {
+		cd.k.dst = dst.id
+	}
+	if rl.keySkill {
+		cd.k.skill = e.SkillID
+	}
+	cd.pairable = true
+	// The same message under the instance ids of its agents: an agent
+	// written without address is found by its instance id and the
+	// instant, and two clients a millisecond apart may find two agents.
+	cd.ki, cd.byInst = cd.k, true
+	if rl.keySrc {
+		cd.ki.src = -int32(e.SrcInstanceID)
+	}
+	if rl.keyDst {
+		cd.ki.dst = -int32(e.DstInstanceID)
+	}
+	if tracks(k) && src.x != nil {
+		if sp := src.x.speaker(t); sp != nil && sp.entry == src.entry {
+			cd.speaker = true
+		}
+	}
+	if w, ok := wearer(k, src, dst); ok && w.x != nil {
+		// A client knows every buff of its character and how long each
+		// lasts; the others are told a part. Every recording looks for
+		// its pairs; the client of the character decides afterwards.
+		// Where the recording of that client starts or ends, what
+		// another one tells alone is kept: the clocks are set within
+		// some milliseconds.
+		cd.owner = int8(m.owner(t, -shared, w.x))
+		cd.ent = w.id
+	}
+	switch k {
+	case evtc.StateBuffChange:
+		cd.stack = stackChanges
+	case evtc.StateBuffActive:
+		cd.stack = stackActive
+	case evtc.StateBuffDeactive:
+		cd.stack = stackDeactive
+	case evtc.StateBuffInitial, evtc.StateBuffApply:
+		// The same opening of a stack.
+		cd.k.kind = evtc.StateBuffApply
+		if dst.x != nil {
+			cd.ent, cd.entry, cd.stack = dst.id, dst.entry, stackOpens
+			if dst.x.gained(dst.entry, t) {
+				// A client that gains an agent writes the stacks it
+				// carries: no message to pair with the one that opened
+				// the stack.
+				cd.gained = true
+				cd.k.p[1] = 1
+			}
+		}
+	case evtc.StateBuffRemoveSingle:
+		if src.x != nil {
+			cd.ent, cd.stack = src.id, stackCloses
+		}
+	case evtc.StateBuffRemoveAll:
+		if src.x != nil {
+			cd.ent, cd.stack = src.id, stackClosesBuff
+		}
+	}
+	if rl.slot != slotNone && src.x != nil {
+		cd.ent, cd.entry, cd.slot, cd.value = src.id, src.entry, rl.slot, rl.value(e)
+		// What a client writes of an agent it has just gained is no
+		// message of the server: it counts when its entry speaks.
+		if src.x.gained(src.entry, t) {
+			cd.gained = true
+			m.tell(*cd)
+			if !src.x.speaks(src.entry, t) {
+				return false
+			}
+			// Two clients that gain the agent a second apart tell it
+			// twice: no pair to look for.
+			cd.pairable = false
+		}
+	}
+	return true
+}
