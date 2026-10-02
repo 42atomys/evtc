@@ -3,6 +3,7 @@ package combine
 import (
 	"cmp"
 	"slices"
+	"sort"
 	"time"
 
 	"github.com/42atomys/evtc"
@@ -696,6 +697,237 @@ func (m *combiner) message(cd *cand, k evtc.StateChange, rl rule, e *evtc.Event,
 		}
 	}
 	return true
+}
+
+// pair looks, for every message of a recording, for the same message
+// among those gathered: the nearest one of the same key that this
+// recording did not claim yet.
+func (m *combiner) pair(ri int, cands []cand) {
+	late := m.lateness(cands)
+	resort := map[key]bool{}
+
+	// The events of an extension go from a client to the others on their
+	// own way, and reach them seconds late and several at once: those of
+	// a key pair in their order.
+	ext := map[key][]int{}
+	for i := range cands {
+		if c := &cands[i]; c.pairable && c.k.kind == evtc.StateExtensionCombat {
+			ext[c.k] = append(ext[c.k], i)
+		}
+	}
+	for k, l := range ext {
+		list, j := m.index[k], 0
+		for _, i := range l {
+			c := &cands[i]
+			for j < len(list) && (list[j].claim == ri || list[j].t < c.t-relay) {
+				j++
+			}
+			if j < len(list) && list[j].t <= c.t+relay {
+				m.claim(ri, c, list[j], resort)
+				j++
+			}
+		}
+	}
+
+	nearest := func(list []*place, at, w time.Duration, skip func(*place) bool) *place {
+		lo := sort.Search(len(list), func(j int) bool { return list[j].t >= at-w })
+		var best *place
+		var bestDist time.Duration
+		for j := lo; j < len(list) && list[j].t <= at+w; j++ {
+			if list[j].claim == ri || (skip != nil && skip(list[j])) {
+				continue
+			}
+			d := list[j].t - at
+			if d < 0 {
+				d = -d
+			}
+			if best == nil || d < bestDist {
+				best, bestDist = list[j], d
+			}
+		}
+		return best
+	}
+	for _, w := range windows {
+		for i := range cands {
+			c := &cands[i]
+			if !c.pairable || c.paired || c.k.kind == evtc.StateExtensionCombat {
+				continue
+			}
+			if best := nearest(m.index[c.k], c.t-late[c.path()], w, nil); best != nil {
+				m.claim(ri, c, best, resort)
+				continue
+			}
+			// The stack a client tells at a gain, which another client that
+			// held the agent tells as an application at the same instant,
+			// is that application; its gain was no more than a quarter
+			// second before. Measured: 352 of 352 such pairs stand within
+			// 100 ms, 324 within 30 ms.
+			if c.stack == stackOpens && w <= 100*time.Millisecond {
+				k := c.k
+				k.p[1] ^= 1
+				if best := nearest(m.index[k], c.t-late[c.path()], w, nil); best != nil {
+					m.claim(ri, c, best, resort)
+				}
+			}
+		}
+	}
+	// A message left alone, that another recording tells at the same
+	// instant under the same instance ids.
+	gained := func(p *place) bool { return m.kept[p.at].gained }
+	for i := range cands {
+		c := &cands[i]
+		if !c.pairable || c.paired || !c.byInst || c.gained {
+			continue
+		}
+		if best := nearest(m.again[c.ki], c.t-late[c.path()], shared, gained); best != nil {
+			m.claim(ri, c, best, resort)
+		}
+	}
+	if m.audit != nil {
+		m.lonely(ri, cands)
+	}
+	for k := range resort {
+		list := m.index[k]
+		sort.SliceStable(list, func(a, b int) bool { return list[a].t < list[b].t })
+	}
+}
+
+// lonely keeps, for the audit, how far the messages of a recording that
+// found no pair stand from the nearest message of their content.
+func (m *combiner) lonely(ri int, cands []cand) {
+	for i := range cands {
+		c := &cands[i]
+		if !c.pairable || c.paired {
+			continue
+		}
+		nearest := forever
+		for _, p := range m.index[c.k] {
+			if p.claim != ri {
+				nearest = min(nearest, (p.t - c.t).Abs())
+			}
+		}
+		if nearest != forever {
+			m.audit.alone[c.k.kind] = append(m.audit.alone[c.k.kind], nearest)
+		}
+	}
+}
+
+// lateness tells how late a recording gets the messages of each path, once
+// the clocks are set on the strikes. The messages told once by this
+// recording and once by those gathered give the delay.
+func (m *combiner) lateness(cands []cand) map[path]time.Duration {
+	count := map[key]int{}
+	for i := range cands {
+		if c := &cands[i]; c.pairable {
+			count[c.k]++
+		}
+	}
+	gaps := map[path][]time.Duration{}
+	for i := range cands {
+		c := &cands[i]
+		if !c.pairable || c.bound != 0 || c.gained || count[c.k] != 1 || len(m.index[c.k]) != 1 {
+			continue
+		}
+		if d := c.t - m.index[c.k][0].t; d >= -widest && d <= widest {
+			gaps[c.path()] = append(gaps[c.path()], d)
+		}
+	}
+	late := map[path]time.Duration{}
+	for p, l := range gaps {
+		if len(l) >= enough {
+			slices.Sort(l)
+			late[p] = l[len(l)/2]
+		}
+	}
+	return late
+}
+
+// claim pairs a message of a recording with a gathered one, and gives the
+// latter what the former tells better.
+func (m *combiner) claim(ri int, c *cand, best *place, resort map[key]bool) {
+	best.claim = ri
+	c.paired = true
+	if m.audit != nil {
+		m.audit.pairs[c.k]++
+		m.audit.gaps[c.k.kind] = append(m.audit.gaps[c.k.kind], (c.t - best.t).Abs())
+		m.audit.order = append(m.audit.order, paired{c.k.kind, best.t, c.t})
+	}
+	k := &m.kept[best.at]
+	// A start or an end is that of a log when every recording that tells
+	// it wrote it as its own started or ended.
+	ofLog := k.ofLog && c.ofLog
+	// A recording names the master of a minion another one left out.
+	srcMaster, dstMaster := cmp.Or(k.e.SrcMasterInstanceID, c.e.SrcMasterInstanceID), cmp.Or(k.e.DstMasterInstanceID, c.e.DstMasterInstanceID)
+	if int(c.owner) == ri && int(k.origin) != ri {
+		// The client of the character tells it best.
+		at, claims := k.t, k.claims
+		*k = *c
+		k.paired, k.t, k.claims = false, at, claims
+	}
+	if c.speaker && !k.speaker && c.owner < 0 {
+		// What happens to an agent goes with the samples of the client
+		// that speaks for it: a teleport dated by another client falls
+		// between two of them.
+		claims := k.claims
+		*k = *c
+		k.paired, k.claims = false, claims
+		best.t = c.t
+		resort[c.k] = true
+	}
+	if c.gained && c.stack == stackOpens && c.t < k.t && k.gained {
+		// Two clients that gained the agent tell the stacks it carries:
+		// the first to see them dates them.
+		claims := k.claims
+		*k = *c
+		k.paired, k.claims = false, claims
+	}
+	if k.gained && !c.gained && c.stack == stackOpens {
+		// The stack told at a gain is the application another client
+		// saw: the application stands, under the key it was found by.
+		at, claims, key := k.t, k.claims, k.k
+		*k = *c
+		k.paired, k.t, k.claims, k.k = false, at, claims, key
+	}
+	if k.src && c.src && k.e.SrcAgent == 0 && c.e.SrcAgent != 0 {
+		// A recording names the agent the other one left out: the
+		// combined log names it.
+		k.e.SrcAgent = c.e.SrcAgent
+	}
+	if k.dst && c.dst && k.e.DstAgent == 0 && c.e.DstAgent != 0 {
+		k.e.DstAgent = c.e.DstAgent
+	}
+	if c.k.kind == evtc.StateExtensionCombat {
+		// The agent that was there is the one.
+		if c.srcThere && !k.srcThere {
+			k.e.SrcAgent, k.srcThere = c.e.SrcAgent, true
+		}
+		if c.dstThere && !k.dstThere {
+			k.e.DstAgent, k.dstThere = c.e.DstAgent, true
+		}
+	}
+	k.claims.add(ri)
+	// What the recordings held together starts at the earliest spawn and
+	// ends at the latest leave.
+	if c.bound != 0 && c.e.Time != k.e.Time && (c.bound > 0) == (c.e.Time > k.e.Time) && !(c.bound > 0 && k.clamped && k.t < c.t) {
+		if c.fight {
+			// The clock of the client that wrote it.
+			k.e = c.e
+		}
+		k.e.Time, k.t, k.moved = c.e.Time, c.t, true
+	}
+	if c.k.kind == evtc.StateExtensionCombat && c.t < k.t {
+		// The client that wrote it first is the closest to the instant
+		// it tells of.
+		k.e.Time, k.t, best.t = c.e.Time, c.t, c.t
+		resort[c.k] = true
+	}
+	k.ofLog = ofLog
+	if k.srcOf != 0 && k.e.SrcMasterInstanceID == 0 {
+		k.e.SrcMasterInstanceID = srcMaster
+	}
+	if k.dstOf != 0 && k.e.DstMasterInstanceID == 0 {
+		k.e.DstMasterInstanceID = dstMaster
+	}
 }
 
 // covered reports whether a recording read before the one given was going
