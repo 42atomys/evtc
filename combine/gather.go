@@ -2,6 +2,7 @@ package combine
 
 import (
 	"cmp"
+	"math/bits"
 	"slices"
 	"sort"
 	"time"
@@ -366,6 +367,20 @@ func at(e *evtc.Event) uint64 {
 		return e.Time
 	}
 	return 0
+}
+
+// gather reads the recordings in turn and returns the events that go on.
+func (m *combiner) gather() []cand {
+	m.index, m.again = map[key][]*place{}, map[key][]*place{}
+	m.defs, m.exts = map[[64]byte]bool{}, map[[56]byte]int{}
+	for ri := range m.recs {
+		cands := m.read(ri)
+		if ri > 0 {
+			m.pair(ri, cands)
+		}
+		m.keep(ri, cands)
+	}
+	return m.close()
 }
 
 // read returns the events of a recording that may go on, as the combined
@@ -930,6 +945,99 @@ func (m *combiner) claim(ri int, c *cand, best *place, resort map[key]bool) {
 	}
 }
 
+// masters names the master of a minion in the events that leave it out,
+// when no entry of the recordings that tell them names it and another
+// entry does: a client learns the master of a minion per table entry, and
+// may list the minion anew without learning it again. What an entry that
+// names the master wrote without it stays so: a client writes the first
+// events of a minion before it learns whose it is.
+func (m *combiner) masters(kept []cand) {
+	named := func(id int32, c *cand, master *uint16) {
+		if id <= 0 || *master != 0 {
+			return
+		}
+		x := m.ents[id-1]
+		if x.master == nil || !x.master.present(c.t) {
+			return
+		}
+		told := c.claims
+		told.add(int(c.origin))
+		for ri := range m.recs {
+			if !told.has(ri) {
+				continue
+			}
+			// The entry of the recording that held the agent then. An
+			// event outside every one stays as it was written.
+			holding := false
+			for _, h := range x.holds {
+				if h.rec == ri && h.track.Contains(c.t) {
+					if slices.Contains(x.named, h.entry) {
+						return
+					}
+					holding = true
+				}
+			}
+			if !holding {
+				return
+			}
+		}
+		*master = x.masterInst
+	}
+	for i := range kept {
+		c := &kept[i]
+		named(c.srcOf, c, &c.e.SrcMasterInstanceID)
+		named(c.dstOf, c, &c.e.DstMasterInstanceID)
+	}
+}
+
+// keep adds to the events gathered those of a recording that found no
+// pair.
+func (m *combiner) keep(ri int, cands []cand) {
+	alone := 0
+	for i := range cands {
+		if !cands[i].paired {
+			alone++
+		}
+	}
+	m.kept = slices.Grow(m.kept, alone)
+	touched, retouched := map[key]bool{}, map[key]bool{}
+	for i := range cands {
+		c := &cands[i]
+		if c.paired {
+			continue
+		}
+		if c.owner >= 0 && int(c.owner) < ri {
+			// The client of the character, read before, tells no such
+			// thing.
+			continue
+		}
+		if c.fight && m.covered(ri, c.t) {
+			// When another client started or stopped recording, within
+			// what a recording read before tells.
+			continue
+		}
+		c.claims = 1 << uint(ri)
+		if c.pairable {
+			p := &place{t: c.t, claim: ri, at: len(m.kept)}
+			m.index[c.k] = append(m.index[c.k], p)
+			touched[c.k] = true
+			if c.byInst {
+				m.again[c.ki] = append(m.again[c.ki], p)
+				retouched[c.ki] = true
+			}
+		}
+		m.kept = append(m.kept, *c)
+	}
+	for k := range touched {
+		list := m.index[k]
+		sort.SliceStable(list, func(a, b int) bool { return list[a].t < list[b].t })
+	}
+	for k := range retouched {
+		list := m.again[k]
+		sort.SliceStable(list, func(a, b int) bool { return list[a].t < list[b].t })
+	}
+}
+
 // covered reports whether a recording read before the one given was going
 // on at t.
 func (m *combiner) covered(ri int, t time.Duration) bool {
@@ -939,4 +1047,70 @@ func (m *combiner) covered(ri int, t time.Duration) bool {
 		}
 	}
 	return false
+}
+
+// recorded reports whether a recording that does not tell an event was
+// going on at the time of it. The start and the end of a log tell nothing
+// of the squad then: the client that writes them started late or stopped
+// early, and the fight starts at the earliest start and ends at the latest
+// end.
+func (m *combiner) recorded(c *cand) bool {
+	for ri, r := range m.recs {
+		if !c.claims.has(ri) && r.span.Start < c.t && c.t < r.span.End {
+			return true
+		}
+	}
+	return false
+}
+
+// close returns the events gathered once every recording is read.
+func (m *combiner) close() []cand {
+	if m.audit != nil {
+		m.audit.lone = make([]map[key][]time.Duration, len(m.recs))
+		for ri := range m.audit.lone {
+			m.audit.lone[ri] = map[key][]time.Duration{}
+		}
+		for i := range m.kept {
+			if c := &m.kept[i]; c.pairable && bits.OnesCount64(uint64(c.claims)) == 1 {
+				m.audit.lone[c.origin][c.k] = append(m.audit.lone[c.origin][c.k], c.t)
+			}
+		}
+	}
+	// What a recording read before the client of a character told of
+	// that character, and that the client does not tell.
+	out := m.kept[:0]
+	for i := range m.kept {
+		c := &m.kept[i]
+		if c.owner >= 0 && c.origin != c.owner && !c.claims.has(int(c.owner)) {
+			continue
+		}
+		if c.ofLog && m.recorded(c) {
+			continue
+		}
+		out = append(out, *c)
+	}
+	// A leave is written in two events, of which a log that ends writes
+	// one: both stand where the last recording saw the agent leave.
+	type end struct {
+		ent  int32
+		span uint64
+	}
+	ends := map[end]time.Duration{}
+	for i := range out {
+		if c := &out[i]; c.bound > 0 && !c.fight && c.ent != 0 {
+			k := end{c.ent, c.k.p[0]}
+			if t, ok := ends[k]; !ok || c.t > t {
+				ends[k] = c.t
+			}
+		}
+	}
+	for i := range out {
+		if c := &out[i]; c.bound > 0 && !c.fight && c.ent != 0 {
+			if t := ends[end{c.ent, c.k.p[0]}]; t != c.t && t-c.t <= sameBound {
+				c.t, c.e.Time, c.moved = t, m.raw(t), true
+			}
+		}
+	}
+	m.kept = nil
+	return out
 }
