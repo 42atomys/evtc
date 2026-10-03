@@ -1,6 +1,7 @@
 package combine
 
 import (
+	"fmt"
 	"slices"
 	"time"
 
@@ -184,4 +185,70 @@ func epoch(tl *timeline.Timeline) int64 {
 		}
 	}
 	return 0
+}
+
+// setClocks gives every recording its offset to the first one. The clock
+// of a recording is set on the first one, or on a recording whose clock is
+// set when it shares too little with the first: by the strikes both hold,
+// or by the ticks of the server when they share too few strikes and were
+// made in the same instance.
+func setClocks(recs []*recording) error {
+	struck := make([]map[strike][]time.Duration, len(recs))
+	clocks := make([]ticks, len(recs))
+	for i, r := range recs {
+		struck[i], clocks[i] = strikes(r), ticksOf(r)
+	}
+	// offset returns the offset of recording i from recording j, and
+	// whether the two can be set on each other.
+	offset := func(j, i int) (time.Duration, bool) {
+		off, n := offsetOf(struck[j], struck[i])
+		if n >= MinStrikes {
+			return off, sameStart(recs[j].tl, recs[i].tl, off)
+		}
+		if !sameInstance(recs[j], recs[i]) {
+			return 0, false
+		}
+		off, n = tickOffset(clocks[j], clocks[i])
+		return off, n >= MinTicks
+	}
+	set := make([]bool, len(recs))
+	set[0] = true
+	for again := true; again; {
+		again = false
+		for i := range recs {
+			if set[i] {
+				continue
+			}
+			for j := range recs {
+				if !set[j] {
+					continue
+				}
+				if off, ok := offset(j, i); ok {
+					recs[i].off, set[i], again = recs[j].off+off, true, true
+					break
+				}
+			}
+		}
+	}
+	for i, r := range recs {
+		if !set[i] {
+			off, n := offsetOf(struck[0], struck[i])
+			if n >= MinStrikes {
+				return fmt.Errorf("%w: started %v apart by the clock of the server, %v by their strikes", ErrFightMismatch, recs[0].tl.Start.Sub(r.tl.Start), off)
+			}
+			if sameInstance(recs[0], r) {
+				_, m := tickOffset(clocks[0], clocks[i])
+				return fmt.Errorf("%w: %d strikes and %d ticks shared, %d and %d wanted", ErrFightMismatch, n, m, MinStrikes, MinTicks)
+			}
+			return fmt.Errorf("%w: %d strikes shared, %d wanted", ErrFightMismatch, n, MinStrikes)
+		}
+		// arcdps 20260920 dates what comes from a message of the server
+		// with an even time and the rest with an odd one: a time keeps its
+		// parity from a recording to the combined log.
+		if d := recs[0].epoch - r.epoch - r.off.Milliseconds(); d%2 != 0 {
+			r.off += time.Millisecond
+		}
+		r.span = timeline.Interval{Start: -r.off, End: r.tl.Duration - r.off}
+	}
+	return nil
 }

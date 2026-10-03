@@ -2,6 +2,27 @@ package combine
 
 import (
 	"cmp"
+	"errors"
+	"fmt"
+)
+
+// MaxLogs is the most logs Logs combines at once.
+const MaxLogs = 64
+
+var (
+	// ErrNoLog is returned when no log is given, or a nil one.
+	ErrNoLog = errors.New("combine: no log")
+	// ErrTooManyLogs is returned when more than MaxLogs logs are given.
+	ErrTooManyLogs = fmt.Errorf("combine: more than %d logs", MaxLogs)
+	// ErrBuildMismatch is returned when the logs were not written by the
+	// same arcdps build: two builds do not write the same events.
+	ErrBuildMismatch = errors.New("combine: logs of several arcdps builds")
+	// ErrFightMismatch is returned when a log shares fewer than MinStrikes
+	// strikes with the others and fewer than MinTicks ticks of their
+	// instance, or started at another time by the clock of the server: it
+	// recorded another fight, or too little of this one for its clock to
+	// be set.
+	ErrFightMismatch = errors.New("combine: logs of several fights")
 )
 
 // before orders the events of the combined log: by time, the definitions
