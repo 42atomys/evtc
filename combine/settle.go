@@ -1,6 +1,8 @@
 package combine
 
 import (
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/42atomys/evtc"
@@ -279,4 +281,119 @@ func (m *combiner) teamOf(ent int32, t time.Duration) uint32 {
 		}
 	}
 	return team
+}
+
+// settle walks the events in time order and drops what tells again what
+// the combined log holds. A client that gains an agent is told what the
+// agent carries and writes its states anew: within one entry of a log
+// these are events as a log alone tells them; once entries are joined
+// into one agent they repeat what is known. The states an entry that does
+// not speak for the agent tells are dropped as well. An agent whose
+// master no event kept names while the master is there keeps the first
+// event dropped that does.
+func (m *combiner) settle(kept []cand) []cand {
+	st := newStacks()
+	mk := markers{tellings: map[telling][]int{}, worn: map[int32]*worn{}, judged: map[telling]bool{}, again: map[int]bool{}}
+	for i := range kept {
+		if c := &kept[i]; c.slot == slotMarker {
+			k := telling{c.ent, c.entry, c.e.Time, c.carried}
+			mk.tellings[k] = append(mk.tellings[k], i)
+		}
+	}
+	states := map[slotKey]held{}
+	// gone holds the agents that left, mastered those an event kept
+	// names the master of while the master is there, and fallen the
+	// first event dropped that does, per agent.
+	gone := map[int32]bool{}
+	mastered := map[int32]bool{}
+	fallen := map[int32]cand{}
+	naming := func(c *cand) bool {
+		if c.srcOf <= 0 || c.e.SrcMasterInstanceID == 0 {
+			return false
+		}
+		x := m.ents[c.srcOf-1]
+		return x.master != nil && x.master.present(c.t)
+	}
+
+	// What is kept takes the place of what is dropped before it.
+	out := kept[:0]
+	for i := range kept {
+		c := &kept[i]
+		restated := st.settle(c)
+		if c.bound > 0 && c.ent != 0 {
+			// What the agent was is to tell again if it comes back.
+			for sl := slotNone; sl <= slotMarker; sl++ {
+				delete(states, slotKey{c.ent, sl})
+			}
+			delete(mk.worn, c.ent)
+			gone[c.ent] = true
+			if c.k.kind == evtc.StateTeamChange && c.e.Value == 0 {
+				// A leave tells the team the agent had. The client that
+				// held it last may not have learned it: the ones that
+				// did tell it.
+				c.e.Value = int32(m.teamOf(c.ent, c.t))
+			}
+		}
+		if c.was && !gone[c.ent] {
+			// The first change the combined log holds tells it.
+			continue
+		}
+		switch {
+		case c.names:
+			restated = true
+		case c.slot == slotMarker:
+			if k := (telling{c.ent, c.entry, c.e.Time, c.carried}); !mk.judged[k] {
+				mk.judge(kept, k)
+			}
+			restated = mk.again[i]
+		case c.slot != slotNone:
+			k := slotKey{c.ent, c.slot}
+			h, ok := states[k]
+			switch {
+			case ok && c.carried && !c.was && c.told <= h.at:
+				// The entry that spoke before told the state later
+				// than the one that takes over: what the latter held
+				// is older.
+				restated = true
+			case !ok || h.value != c.value:
+				states[k] = held{c.value, c.entry, c.e.Time}
+			case c.carried:
+				// Nothing to carry over: the combined log holds it.
+				restated = true
+			case h.entry == c.entry:
+				states[k] = held{c.value, c.entry, c.e.Time}
+			case (!c.gained || c.slot.moving()) && c.e.Time-h.at > uint64(sameBound/time.Millisecond):
+				// What a client tells of an agent it holds is an event
+				// of its log, the value new or not. Within sameBound
+				// of the same telling by the entry that spoke before,
+				// it is that telling, dated by another client.
+				states[k] = held{c.value, c.entry, c.e.Time}
+			case m.anew(c, h):
+				states[k] = held{c.value, c.entry, c.e.Time}
+			default:
+				// The entry takes the state over: what it tells next
+				// is its own, as in its log.
+				restated = true
+				states[k] = held{h.value, c.entry, h.at}
+			}
+		}
+		if restated {
+			if _, ok := fallen[c.srcOf]; !ok && c.stack == stackNone && c.slot != slotMarker && naming(c) {
+				fallen[c.srcOf] = *c
+			}
+			continue
+		}
+		if naming(c) {
+			mastered[c.srcOf] = true
+		}
+		out = append(out, *c)
+	}
+	for _, id := range slices.Sorted(maps.Keys(fallen)) {
+		if !mastered[id] {
+			c := fallen[id]
+			j, _ := slices.BinarySearchFunc(out, c, before)
+			out = slices.Insert(out, j, c)
+		}
+	}
+	return out
 }
