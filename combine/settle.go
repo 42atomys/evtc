@@ -156,3 +156,127 @@ func (s *stacks) settle(c *cand) (restated bool) {
 	}
 	return false
 }
+
+// telling is what an entry tells of the markers of an agent at one
+// instant: an event that takes them all off, then one per marker.
+type telling struct {
+	ent, entry int32
+	at         uint64
+	carried    bool
+}
+
+// worn holds the markers an agent wears and the entry that told them.
+type worn struct {
+	set   map[state]bool
+	entry int32
+}
+
+// markers follows the markers of the agents of the combined log.
+type markers struct {
+	tellings map[telling][]int
+	worn     map[int32]*worn
+	judged   map[telling]bool
+	// again holds the events that tell what is worn already.
+	again map[int]bool
+}
+
+// judge decides, for the events of one telling, which ones tell again
+// what the agent wears.
+func (m *markers) judge(kept []cand, k telling) {
+	m.judged[k] = true
+	w := m.worn[k.ent]
+	if w == nil {
+		w = &worn{set: map[state]bool{}}
+		m.worn[k.ent] = w
+	}
+	said := map[state]bool{}
+	whole := false
+	for _, i := range m.tellings[k] {
+		if v := kept[i].value; v[0] == 0 {
+			whole = true
+		} else {
+			said[v] = true
+		}
+	}
+	if !whole {
+		// Markers put on top of those worn.
+		for _, i := range m.tellings[k] {
+			v := kept[i].value
+			if w.set[v] && (w.entry != k.entry || k.carried) {
+				m.again[i] = true
+			} else {
+				w.set[v] = true
+			}
+		}
+		return
+	}
+	same := len(said) == len(w.set) && (w.entry != 0 || k.carried)
+	for v := range said {
+		if !w.set[v] {
+			same = false
+		}
+	}
+	if same && (w.entry != k.entry || k.carried) {
+		for _, i := range m.tellings[k] {
+			m.again[i] = true
+		}
+		if !k.carried {
+			w.entry = k.entry
+		}
+		return
+	}
+	w.set, w.entry = said, k.entry
+}
+
+// slotKey names a state of an agent.
+type slotKey struct {
+	ent  int32
+	slot slot
+}
+
+// held is the value of a state, the entry that told it and when.
+type held struct {
+	value state
+	entry int32
+	at    uint64
+}
+
+// anew reports whether an entry that takes a state over tells it anew,
+// within sameBound of the last telling of the entry that spoke before. An
+// entry that told the value as many times as the other one did, up to that
+// telling, tells another event; one that told it fewer times tells that
+// telling, dated by another client.
+func (m *combiner) anew(c *cand, h held) bool {
+	if c.gained || c.slot.moving() {
+		return false
+	}
+	from := h.at - min(h.at, uint64(sameBound/time.Millisecond))
+	told := func(entry int32, until uint64) int {
+		n := 0
+		for _, p := range m.tellings[entry][c.slot] {
+			if at := m.raw(p.t); at >= from && at < until && p.c.value == c.value {
+				n++
+			}
+		}
+		return n
+	}
+	return told(c.entry, c.e.Time) >= told(h.entry, h.at+1)
+}
+
+// teamOf returns the team an agent had at t, as the entries that held it
+// told it: the last change of team one of them told before t, or the team
+// one held before its first change. 0 when none told it.
+func (m *combiner) teamOf(ent int32, t time.Duration) uint32 {
+	team, at := uint32(0), time.Duration(-1)
+	for _, h := range m.ents[ent-1].holds {
+		if b, ok := m.before[h.entry][slotTeam]; ok && b.t <= t && b.t > at {
+			team, at = uint32(b.c.e.DstAgent), b.t
+		}
+		for _, told := range m.tellings[h.entry][slotTeam] {
+			if told.t <= t && told.t >= at && told.c.e.DstAgent != 0 {
+				team, at = uint32(told.c.e.DstAgent), told.t
+			}
+		}
+	}
+	return team
+}
