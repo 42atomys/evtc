@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/42atomys/evtc"
 	"github.com/42atomys/evtc/timeline"
 )
 
@@ -175,6 +176,199 @@ func TestSpeaker(t *testing.T) {
 	}
 	if !x.speaks(2, 2*time.Second) || x.speaks(1, 2*time.Second) || !x.speaks(1, 4*time.Second) {
 		t.Error("an entry speaks when it holds the instant, or when nobody does")
+	}
+}
+
+// agentsNamed returns the agents of a timeline that carry a name.
+func agentsNamed(tl *timeline.Timeline, name string) []*timeline.Agent {
+	return tl.Agents().Where(func(a *timeline.Agent) bool { return a.Name == name }).All()
+}
+
+// TestJoinAcrossViews checks that an agent two clients held at other
+// times is one agent, held from the first spawn to the last leave.
+func TestJoinAcrossViews(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	a.npc(crow, 1083, "Crow")
+	b.npc(crow, 1083, "Crow")
+	a.spawn(1000, crow)
+	for ts := uint64(1000); ts <= 3000; ts += 100 {
+		a.position(ts, crow, float32(ts), 0)
+	}
+	a.despawn(3000, crow)
+	b.spawn(2000, crow)
+	for ts := uint64(2000); ts < 4000; ts += 100 {
+		b.position(ts+1, crow, float32(ts), 5)
+	}
+	b.despawn(4000, crow)
+	l, tl, m := audited(t, s.logs(5000)...)
+
+	crows := agentsNamed(tl, "Crow")
+	if len(crows) != 1 {
+		t.Fatalf("%d crows in the combined log", len(crows))
+	}
+	c := crows[0]
+	if c.Lifetime != iv(1000, 4000) || c.Addr != a.addr(crow) || c.InstanceID != crow {
+		t.Errorf("crow %#x lives over %v", c.Addr, c.Lifetime)
+	}
+	if got := count(l, evtc.StateSpawn); got != 1 {
+		t.Errorf("%d spawns, want the first one", got)
+	}
+	if got := of(l, evtc.StateDespawn); len(got) != 1 || got[0].Time != a.at(4000) {
+		t.Errorf("despawns = %+v, want the last one", got)
+	}
+	// The first client speaks over what it held, the second one after.
+	if got, want := c.Position.Len(), 21+10; got != want {
+		t.Errorf("%d position samples, want %d", got, want)
+	}
+	if p := c.PositionAt(2500 * time.Millisecond); p.Y != 0 {
+		t.Errorf("position at 2.5s = %v, want the one of the first client", p)
+	}
+	if p := c.PositionAt(3500 * time.Millisecond); p.Y != 5 {
+		t.Errorf("position at 3.5s = %v, want the one of the second client", p)
+	}
+	x := m.recs[0].entity[m.recs[0].tl.Agent(a.addr(crow))]
+	if x == nil || x != m.recs[1].entity[m.recs[1].tl.Agent(b.addr(crow))] || len(x.holds) != 2 {
+		t.Fatalf("the two entries stand for %v", x)
+	}
+	if !slices.Equal(x.spans, []timeline.Interval{iv(1000, 4000)}) {
+		t.Errorf("spans = %v", x.spans)
+	}
+}
+
+// TestJoinInstanceReused checks that the agents that carried one instance
+// id one after the other stay apart.
+func TestJoinInstanceReused(t *testing.T) {
+	s := newScene(2)
+	for i, r := range s.recs {
+		// Each client dates what it sees some milliseconds apart.
+		d := uint64(i * 20)
+		r.npc(crow, 1083, "Crow")
+		r.l.Agents = append(r.l.Agents, evtc.Agent{Addr: r.base | 0x100 | crow, Profession: 1084, IsElite: 0xffffffff, Name: "Rat"})
+		r.spawn(1000+d, crow)
+		r.position(1100+d, crow, 10, 10)
+		r.hit(1500, alpha, crow, skillSlam, 111)
+		r.despawn(2000+d, crow)
+		rat := evtc.Event{SrcAgent: r.base | 0x100 | crow, SrcInstanceID: crow}
+		for _, e := range []struct {
+			t    uint64
+			kind evtc.StateChange
+		}{{2500 + d, evtc.StateSpawn}, {2600 + d, evtc.StateEnterCombat}, {3500 + d, evtc.StateDespawn}} {
+			ev := rat
+			ev.Time, ev.IsStateChange = r.at(e.t), e.kind
+			r.l.Events = append(r.l.Events, ev)
+		}
+	}
+	_, tl, _ := audited(t, s.logs(5000)...)
+	crows, rats := agentsNamed(tl, "Crow"), agentsNamed(tl, "Rat")
+	if len(crows) != 1 || len(rats) != 1 {
+		t.Fatalf("%d crows and %d rats", len(crows), len(rats))
+	}
+	if crows[0].Lifetime != iv(1000, 2020) || rats[0].Lifetime != iv(2500, 3520) {
+		t.Errorf("crow over %v, rat over %v", crows[0].Lifetime, rats[0].Lifetime)
+	}
+	if tl.Hits().On(crows[0]).Count() != 1 {
+		t.Errorf("%d hits on the crow", tl.Hits().On(crows[0]).Count())
+	}
+}
+
+// TestJoinSpecies checks that two creatures of other species are not
+// joined by the instance id they share.
+func TestJoinSpecies(t *testing.T) {
+	s := newScene(2)
+	s.recs[0].npc(crow, 1083, "Crow")
+	s.recs[1].npc(crow, 1084, "Rat")
+	s.each(func(r *recorder) {
+		r.spawn(1000, crow)
+		r.position(1100, crow, 10, 10)
+		r.despawn(3000, crow)
+	})
+	_, tl, _ := audited(t, s.logs(5000)...)
+	if len(agentsNamed(tl, "Crow")) != 1 || len(agentsNamed(tl, "Rat")) != 1 {
+		t.Errorf("crows %d, rats %d", len(agentsNamed(tl, "Crow")), len(agentsNamed(tl, "Rat")))
+	}
+}
+
+// TestJoinPlayers checks that players are joined by their account, under
+// the address of the first recording, and that a player only another
+// recording lists is added.
+func TestJoinPlayers(t *testing.T) {
+	s := newScene(2)
+	b := s.recs[1]
+	b.player(14, "Delta", ":Delta.3456", "2")
+	b.ev(1000, evtc.StateEnterCombat, 14, 0, evtc.Event{})
+	b.hit(1500, 14, boss, skillSlam, 321)
+	l, tl, _ := audited(t, s.logs(5000)...)
+	if tl.Players().Count() != 4 || len(l.Agents) != 5 {
+		t.Fatalf("%d players, %d agents", tl.Players().Count(), len(l.Agents))
+	}
+	for _, name := range []string{"Alpha", "Bravo", "Charlie"} {
+		p := tl.PlayerByName(name)
+		if p == nil || p.Ref().Addr>>32 != 1 {
+			t.Errorf("%s = %v", name, p)
+		}
+	}
+	d := tl.PlayerByName("Delta")
+	if d == nil || d.Ref().Addr != b.addr(14) || tl.Hits().By(d).Count() != 1 {
+		t.Errorf("Delta = %v", d)
+	}
+}
+
+// TestJoinWithoutInstance checks the agents without instance id that
+// share a name: nothing tells them apart from a recording to the other,
+// and the first one that holds some keeps its own.
+func TestJoinWithoutInstance(t *testing.T) {
+	s := newScene(2)
+	s.each(func(r *recorder) {
+		for i := range 2 {
+			addr := r.base | uint64(0x500+i)
+			r.l.Agents = append(r.l.Agents, evtc.Agent{Addr: addr, Profession: 0xffff0000 | 7307, IsElite: 0xffffffff, Name: "Turret"})
+			r.l.Events = append(r.l.Events, evtc.Event{Time: r.at(uint64(1000 + 100*i)), SrcAgent: addr, DstAgent: 1, IsStateChange: evtc.StateTargetable})
+		}
+	})
+	l, tl, m := audited(t, s.logs(5000)...)
+	if got := len(agentsNamed(tl, "Turret")); got != 2 {
+		t.Errorf("%d turrets, want those of the first recording", got)
+	}
+	if got := count(l, evtc.StateTargetable); got != 2 {
+		t.Errorf("%d events of the turrets", got)
+	}
+	if len(m.recs[0].unnamed) != 0 || len(m.recs[1].unnamed) != 2 {
+		t.Errorf("entries left out: %d and %d", len(m.recs[0].unnamed), len(m.recs[1].unnamed))
+	}
+
+	// One per recording is the same agent.
+	s = newScene(2)
+	s.each(func(r *recorder) {
+		addr := r.base | 0x500
+		r.l.Agents = append(r.l.Agents, evtc.Agent{Addr: addr, Profession: 0xffff0000 | 7307, IsElite: 0xffffffff, Name: "Turret"})
+		r.l.Events = append(r.l.Events, evtc.Event{Time: r.at(1000), SrcAgent: addr, DstAgent: 1, IsStateChange: evtc.StateTargetable})
+	})
+	l, tl, _ = audited(t, s.logs(5000)...)
+	if len(agentsNamed(tl, "Turret")) != 1 || count(l, evtc.StateTargetable) != 1 {
+		t.Errorf("%d turrets, %d events", len(agentsNamed(tl, "Turret")), count(l, evtc.StateTargetable))
+	}
+}
+
+// TestJoinStill checks that an agent that never moved, met by two clients
+// at other times, is told by where it stands.
+func TestJoinStill(t *testing.T) {
+	for _, tt := range []struct {
+		x    float32
+		want int
+	}{{100, 1}, {900, 2}} {
+		s := newScene(2)
+		a, b := s.recs[0], s.recs[1]
+		a.gadget(cannon, 7307, "Cannon")
+		b.gadget(cannon, 7307, "Cannon")
+		a.position(1000, cannon, 100, 100)
+		a.despawn(1500, cannon)
+		b.spawn(3000, cannon)
+		b.position(3001, cannon, tt.x, 100)
+		_, tl, _ := audited(t, s.logs(5000)...)
+		if got := len(agentsNamed(tl, "Cannon")); got != tt.want {
+			t.Errorf("met at %v: %d cannons, want %d", tt.x, got, tt.want)
+		}
 	}
 }
 
