@@ -131,6 +131,47 @@ func TestLogsLeaveInputs(t *testing.T) {
 	}
 }
 
+// TestLogsItself checks that a log combined with itself comes back as it
+// is.
+func TestLogsItself(t *testing.T) {
+	s := newScene(1)
+	r := s.recs[0]
+	r.npc(crow, 1083, "Crow")
+	r.spawn(1000, crow)
+	r.position(1100, crow, 10, 20)
+	r.hit(1200, alpha, crow, skillSlam, 500)
+	r.apply(1300, alpha, bravo, skillMight, 10000, 1)
+	r.remove(2300, bravo, skillMight, 1)
+	r.despawn(3000, crow)
+	l := s.logs(5000)[0]
+	got, err := Logs(l, l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := timeline.Build(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tl, err := timeline.Build(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, b := totalsOf(want), totalsOf(tl); a != b {
+		t.Errorf("totals = %+v, want %+v", b, a)
+	}
+	if !sameLog(got, mustSorted(l)) {
+		t.Error("the log does not come back as it is")
+	}
+}
+
+// mustSorted returns a log with its events in time order, the
+// definitions first, as a combined log holds them.
+func mustSorted(l *evtc.Log) *evtc.Log {
+	out := clone(l)
+	sortEvents(out.Events)
+	return out
+}
+
 func TestFiles(t *testing.T) {
 	logs := newScene(2).logs(5000)
 	dir := t.TempDir()
@@ -153,5 +194,28 @@ func TestFiles(t *testing.T) {
 	}
 	if _, err := Files(paths[0], filepath.Join(dir, "missing.zevtc")); err == nil {
 		t.Error("a missing file was combined")
+	}
+}
+
+// TestLaterBuild checks the logs of an arcdps build later than the
+// package knows: they are combined as the others, and the events of a
+// kind it has no rule for come from the first recording.
+func TestLaterBuild(t *testing.T) {
+	s := newScene(2)
+	later := evtc.StateUnknown + 3
+	s.each(func(r *recorder) {
+		r.l.Header.Build = "20301231"
+		r.ev(2000, later, alpha, 0, evtc.Event{Value: 7})
+		r.hit(2500, bravo, boss, skillSlam, 700)
+	})
+	s.recs[1].ev(2100, later, bravo, 0, evtc.Event{Value: 8})
+	logs := s.logs(5000)
+	l, tl, _ := audited(t, logs...)
+	got := of(l, later)
+	if len(got) != 1 || got[0] != of(logs[0], later)[0] {
+		t.Errorf("events of the later kind = %+v", got)
+	}
+	if n := tl.Hits().On(tl.Boss()).Count(); n != 41 || l.Header.Build != "20301231" {
+		t.Errorf("%d hits on the boss, build %s", n, l.Header.Build)
 	}
 }

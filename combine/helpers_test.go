@@ -1,6 +1,7 @@
 package combine
 
 import (
+	"cmp"
 	"math"
 	"slices"
 	"testing"
@@ -265,4 +266,45 @@ func sameLog(a, b *evtc.Log) bool {
 // clone returns a copy of a log that shares nothing with it.
 func clone(l *evtc.Log) *evtc.Log {
 	return &evtc.Log{Header: l.Header, Agents: slices.Clone(l.Agents), Skills: slices.Clone(l.Skills), Events: slices.Clone(l.Events)}
+}
+
+// totals are the counted nodes of a timeline.
+type totals struct {
+	players, npcs, gadgets                int
+	strikes, ticks, casts, stacks         int
+	effects, missiles, downs, deaths      int
+	breakbars, markers, positions, events int
+	groundMarkers, rewards                int
+	strikeDamage                          int64
+}
+
+func totalsOf(tl *timeline.Timeline) totals {
+	t := totals{
+		players: tl.Players().Count(), npcs: tl.NPCs().Count(), gadgets: tl.Gadgets().Count(),
+		casts: tl.Casts().Count(), stacks: tl.Stacks().Count(), effects: tl.Effects().Count(), missiles: tl.Missiles().Count(),
+		groundMarkers: len(tl.GroundMarkers), rewards: len(tl.Rewards), events: len(tl.Log.Events),
+	}
+	for h := range tl.Hits().Seq() {
+		switch {
+		case h.IsStrike():
+			t.strikes++
+			t.strikeDamage += int64(h.Damage)
+		case h.IsBuffDamage():
+			t.ticks++
+		}
+	}
+	for a := range tl.Agents().Seq() {
+		t.downs += len(a.Downs)
+		t.deaths += len(a.Deaths)
+		t.breakbars += len(a.Breakbars)
+		t.markers += len(a.Markers)
+		t.positions += a.Position.Len()
+	}
+	return t
+}
+
+// sortEvents puts events in the order of a combined log: by time, those
+// without a time first.
+func sortEvents(events []evtc.Event) {
+	slices.SortStableFunc(events, func(a, b evtc.Event) int { return cmp.Compare(at(&a), at(&b)) })
 }
