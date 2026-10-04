@@ -254,3 +254,15 @@ func of(l *evtc.Log, kind evtc.StateChange) []evtc.Event {
 	}
 	return out
 }
+
+// sameLog reports whether two logs hold the same header, tables and
+// events.
+func sameLog(a, b *evtc.Log) bool {
+	return a.Header == b.Header && slices.Equal(a.Agents, b.Agents) &&
+		slices.Equal(a.Skills, b.Skills) && slices.Equal(a.Events, b.Events)
+}
+
+// clone returns a copy of a log that shares nothing with it.
+func clone(l *evtc.Log) *evtc.Log {
+	return &evtc.Log{Header: l.Header, Agents: slices.Clone(l.Agents), Skills: slices.Clone(l.Skills), Events: slices.Clone(l.Events)}
+}
