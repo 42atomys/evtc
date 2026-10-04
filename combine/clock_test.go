@@ -3,7 +3,19 @@ package combine
 import (
 	"testing"
 	"time"
+
+	"github.com/42atomys/evtc"
 )
+
+// mustRecord builds the recordings of the logs, their clocks set.
+func mustRecord(tb testing.TB, logs ...*evtc.Log) []*recording {
+	tb.Helper()
+	recs, err := recordings(logs)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return recs
+}
 
 func TestOffsetOf(t *testing.T) {
 	a := map[strike][]time.Duration{

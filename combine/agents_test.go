@@ -372,6 +372,178 @@ func TestJoinStill(t *testing.T) {
 	}
 }
 
+// TestMasters checks that the events of a minion get the master another
+// recording names.
+func TestMasters(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	a.npc(pet, 6524, "Elemental")
+	b.npc(pet, 6524, "Elemental")
+	s.each(func(r *recorder) { r.spawn(1000, pet) })
+	// The client of the master knows whose minion it is.
+	a.ev(1500, evtc.StateCombat, pet, boss, evtc.Event{SkillID: skillSlam, Value: 50, SrcMasterInstanceID: alpha, IFF: evtc.IFFFoe})
+	b.hit(1500, pet, boss, skillSlam, 50)
+	b.hit(2500, pet, boss, skillSlam, 60)
+	b.hit(2600, boss, pet, skillSlam, 70)
+	// A master the second client lists and never met.
+	b.npc(50, 6000, "Golem")
+	b.ev(100, evtc.StateCombat, crow, boss, evtc.Event{SkillID: skillSlam, Value: 80, SrcMasterInstanceID: 50, IFF: evtc.IFFFoe})
+	s.each(func(r *recorder) { r.despawn(3000, pet) })
+	l, tl, _ := audited(t, s.logs(5000)...)
+	pets := agentsNamed(tl, "Elemental")
+	if len(pets) != 1 || pets[0].Master == nil || pets[0].Master.Name != "Alpha" {
+		t.Fatalf("pets = %v", pets)
+	}
+	if on := strikesOf(l, skillSlam); len(on) != 4 || on[3].DstMasterInstanceID != alpha || on[0].SrcMasterInstanceID != 50 {
+		t.Errorf("strikes = %+v", on)
+	}
+	hits := tl.Hits().By(pets[0]).All()
+	if len(hits) != 2 {
+		t.Fatalf("%d hits of the pet", len(hits))
+	}
+	for _, h := range hits {
+		if h.Event.SrcMasterInstanceID != alpha {
+			t.Errorf("hit at %v names the master %d", h.Time, h.Event.SrcMasterInstanceID)
+		}
+	}
+	if got := tl.Hits().CreditedTo(tl.PlayerByName("Alpha")).Where(func(h *timeline.Hit) bool { return h.Src == pets[0] }).Count(); got != 2 {
+		t.Errorf("%d hits of the pet credited to its master", got)
+	}
+}
+
+// TestMasterOf checks the master a recording names for an agent: in the
+// events that name the agent by its address, as their source or as their
+// destination.
+func TestMasterOf(t *testing.T) {
+	s := newScene(1)
+	r := s.recs[0]
+	r.npc(pet, 6524, "Elemental")
+	r.npc(crow, 1083, "Crow")
+	r.spawn(1000, pet)
+	r.spawn(1000, crow)
+	// The heal of an addon names no master for the recording.
+	r.heal(1200, pet, alpha, skillRegen, 100, 0x80)
+	r.ev(1500, evtc.StateCombat, boss, pet, evtc.Event{SkillID: skillSlam, Value: 50, DstMasterInstanceID: alpha, IFF: evtc.IFFFoe})
+	// An event written without address names the crow by its instance id
+	// alone.
+	r.l.Events = append(r.l.Events, evtc.Event{Time: r.at(1600), SrcInstanceID: crow, SrcMasterInstanceID: bravo, IsStateChange: evtc.StateDespawn})
+	rec := mustRecord(t, s.logs(5000)...)[0]
+	for _, tt := range []struct {
+		name string
+		want string
+	}{{"Elemental", "Alpha"}, {"Crow", ""}, {"Alpha", ""}, {"Sabetha", ""}} {
+		a := agentsNamed(rec.tl, tt.name)[0]
+		got := ""
+		if of := masterOf(rec, a); of != nil {
+			got = of.Name
+		}
+		if got != tt.want {
+			t.Errorf("master of %s = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+	if c := agentsNamed(rec.tl, "Crow")[0]; c.Master == nil {
+		t.Error("the timeline gives the crow no master: the test checks nothing")
+	}
+}
+
+// TestMastersLeftOut checks the events a client that knows the master of
+// a minion writes without it, as it does when the minion comes: they stay
+// as they were written, whatever the other clients tell.
+func TestMastersLeftOut(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) {
+		r.npc(pet, 6524, "Elemental")
+		r.spawn(1000, pet)
+		r.hit(1000, pet, boss, skillSlam, 50)
+	})
+	a.ev(1500, evtc.StateCombat, pet, boss, evtc.Event{SkillID: skillSlam, Value: 60, SrcMasterInstanceID: alpha, IFF: evtc.IFFFoe})
+	b.hit(1500, pet, boss, skillSlam, 60)
+	b.hit(2500, pet, boss, skillSlam, 70)
+	// A strike the second client tells alone before the first one names
+	// the master gets it: the master of a minion is the same over its
+	// life.
+	b.hit(1200, pet, boss, skillSlam, 55)
+	s.each(func(r *recorder) { r.despawn(3000, pet) })
+	for _, logs := range [][]*evtc.Log{s.logs(5000), {s.recs[1].l, s.recs[0].l}} {
+		l, _, _ := audited(t, logs...)
+		var got []uint16
+		for _, e := range strikesOf(l, skillSlam) {
+			got = append(got, e.SrcMasterInstanceID)
+		}
+		if !slices.Equal(got, []uint16{0, alpha, alpha, alpha}) {
+			t.Errorf("masters of the strikes = %v", got)
+		}
+	}
+}
+
+// TestMastersListedAnew checks the master of a minion a client lists
+// anew: the entry that names the master gives it to the events of the
+// entries that never name it, those told by another client included.
+func TestMastersListedAnew(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) {
+		r.npc(pet, 6524, "Elemental")
+		r.spawn(1000, pet)
+		r.hit(1500, pet, boss, skillSlam, 50)
+	})
+	a.despawn(2000, pet)
+	// The first client lists the minion anew, under another address, and
+	// learns whose it is this time.
+	again := a.base | 0x10000 | uint64(pet)
+	a.l.Agents = append(a.l.Agents, evtc.Agent{Addr: again, Profession: 6524, IsElite: 0xffffffff, Name: "Elemental"})
+	a.l.Events = append(a.l.Events,
+		evtc.Event{Time: a.at(3000), SrcAgent: again, SrcInstanceID: pet, IsStateChange: evtc.StateSpawn},
+		evtc.Event{Time: a.at(3500), SrcAgent: again, SrcInstanceID: pet, SrcMasterInstanceID: alpha, DstAgent: a.addr(boss), DstInstanceID: boss, SkillID: skillSlam, Value: 60, IFF: evtc.IFFFoe},
+		evtc.Event{Time: a.at(4000), SrcAgent: again, SrcInstanceID: pet, IsStateChange: evtc.StateDespawn})
+	b.hit(2500, pet, boss, skillSlam, 55)
+	b.hit(3500, pet, boss, skillSlam, 60)
+	b.despawn(4000, pet)
+	for _, logs := range [][]*evtc.Log{s.logs(5000), {b.l, a.l}} {
+		l, tl, _ := audited(t, logs...)
+		var got []uint16
+		for _, e := range strikesOf(l, skillSlam) {
+			got = append(got, e.SrcMasterInstanceID)
+		}
+		if !slices.Equal(got, []uint16{alpha, alpha, alpha}) {
+			t.Errorf("masters of the strikes = %v", got)
+		}
+		if pets := agentsNamed(tl, "Elemental"); len(pets) != 1 || pets[0].Master == nil || pets[0].Master.Name != "Alpha" {
+			t.Errorf("pets = %v", pets)
+		}
+	}
+}
+
+// TestMastersNamed checks that the master of an agent is one a recording
+// names in the events of that agent. A player has none, and an event of an
+// extension, which may name the address of another agent, gives none.
+func TestMastersNamed(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) {
+		r.npc(crow, 1083, "Crow")
+		r.spawn(1000, crow)
+		r.hit(1500, crow, boss, skillSlam, 50)
+		r.despawn(4000, crow)
+	})
+	a.hit(2000, bravo, boss, skillSlam, 60)
+	a.hit(2100, crow, boss, skillSlam, 70)
+	// The addon of the second client names the address of a player, then
+	// of the crow, under the instance id of a minion of alpha.
+	b.ev(3000, evtc.StateExtensionCombat, alpha, 0, withID(evtc.Event{DstAgent: b.addr(bravo), DstInstanceID: pet, DstMasterInstanceID: alpha, SkillID: skillRegen, Value: -900, IsOffcycle: 0x40}, healing))
+	b.ev(3100, evtc.StateExtensionCombat, alpha, 0, withID(evtc.Event{DstAgent: b.addr(crow), DstInstanceID: pet, DstMasterInstanceID: alpha, SkillID: skillRegen, Value: -800, IsOffcycle: 0x40}, healing))
+	l, _, _ := audited(t, s.logs(5000)...)
+	for _, e := range strikesOf(l, skillSlam) {
+		if e.SrcMasterInstanceID != 0 {
+			t.Errorf("the strike of %d names the master %d", e.SrcInstanceID, e.SrcMasterInstanceID)
+		}
+	}
+	if got := len(strikesOf(l, skillSlam)); got != 3 {
+		t.Errorf("%d strikes", got)
+	}
+}
+
 func TestSameIdentity(t *testing.T) {
 	player := func(name, account string, inst uint16) *timeline.Agent {
 		return &timeline.Agent{Kind: timeline.KindPlayer, Name: name, InstanceID: inst, Player: &timeline.Player{Account: account}}
