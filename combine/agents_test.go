@@ -584,6 +584,40 @@ func TestSameIdentity(t *testing.T) {
 	}
 }
 
+func TestHoldOfEntry(t *testing.T) {
+	x := &entity{holds: []hold{{entry: 3, held: []timeline.Interval{iv(1000, 2000)}, spawns: ms(1000)}}}
+	if x.hold(3) == nil || x.hold(4) != nil {
+		t.Error("hold finds the entry given alone")
+	}
+	for _, tt := range []struct {
+		entry           int32
+		at              int
+		started, gained bool
+	}{
+		{3, 1000, true, true},
+		{3, 1250, true, true},
+		{3, 1251, false, false},
+		{3, 999, false, false},
+		{4, 1000, false, false},
+	} {
+		at := time.Duration(tt.at) * time.Millisecond
+		if x.started(tt.entry, at) != tt.started || x.gained(tt.entry, at) != tt.gained {
+			t.Errorf("entry %d at %d ms: started %v, gained %v", tt.entry, tt.at, x.started(tt.entry, at), x.gained(tt.entry, at))
+		}
+	}
+	// Held from the start of the recordings without a spawn: the agent
+	// was there, no client gained it.
+	x = &entity{holds: []hold{{entry: 3, held: []timeline.Interval{iv(0, 2000)}}}}
+	if !x.started(3, 100*time.Millisecond) || x.gained(3, 100*time.Millisecond) {
+		t.Error("an agent held from the start was gained")
+	}
+	// A recording that started after another one gains what it holds.
+	x.first = -2 * time.Second
+	if !x.gained(3, 100*time.Millisecond) {
+		t.Error("a recording that started later gained nothing")
+	}
+}
+
 // TestSegmentsOfOneRecording checks the entries a recording split: they
 // speak in the order they were held.
 func TestSegmentsOfOneRecording(t *testing.T) {
@@ -594,5 +628,83 @@ func TestSegmentsOfOneRecording(t *testing.T) {
 	want := []segment{{iv(0, 2900), 0, 1}, {iv(3000, 5500), 0, 2}}
 	if !slices.Equal(got, want) {
 		t.Errorf("segments = %v, want %v", got, want)
+	}
+}
+
+func TestHeldOf(t *testing.T) {
+	s := newScene(1)
+	r := s.recs[0]
+	r.npc(crow, 1083, "Crow")
+	r.spawn(1000, crow)
+	r.despawn(2000, crow)
+	// A stray despawn, written for the instance id long after.
+	r.l.Events = append(r.l.Events, evtc.Event{Time: r.at(2400), SrcInstanceID: crow, IsStateChange: evtc.StateDespawn})
+	r.spawn(3000, crow)
+	r.position(3100, crow, 1, 1)
+	r.despawn(4000, crow)
+	// The client told something of the agent after it left: it was there.
+	r.position(4200, crow, 2, 2)
+	r.despawn(4600, crow)
+	recs := mustRecord(t, s.logs(6000)...)
+	var n *node
+	nodes := entries(recs)
+	for i := range nodes {
+		if nodes[i].agent.Name == "Crow" {
+			n = &nodes[i]
+		}
+	}
+	if n == nil {
+		t.Fatal("no entry for the crow")
+	}
+	if want := []timeline.Interval{iv(1000, 2400), iv(3000, 4600)}; !slices.Equal(n.held, want) {
+		t.Errorf("held = %v, want %v", n.held, want)
+	}
+	if n.track != iv(1000, 4600) || !slices.Equal(n.spawns, ms(1000, 3000)) || len(n.leaves) != 4 {
+		t.Errorf("track %v, spawns %v, leaves %v", n.track, n.spawns, n.leaves)
+	}
+
+	// An entry whose track ends before it starts is held over its track.
+	odd := &node{hold: hold{track: iv(3000, 2000)}}
+	if got := heldOf(odd, recs[0], nil); !slices.Equal(got, []timeline.Interval{iv(3000, 2000)}) {
+		t.Errorf("held = %v", got)
+	}
+}
+
+// second writes an event of another agent that carries the instance id
+// of the crow, under an address of its own.
+func (r *recorder) second(t uint64, kind evtc.StateChange) {
+	r.l.Events = append(r.l.Events, evtc.Event{Time: r.at(t), SrcAgent: r.base | 0x100 | crow, SrcInstanceID: crow, IsStateChange: kind})
+}
+
+// TestJoinSplitEntry checks the entries a recording split when another
+// one went on holding the agent: they are one agent.
+func TestJoinSplitEntry(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	b.npc(crow, 1083, "Crow")
+	b.spawn(1000, crow)
+	b.position(1100, crow, 1, 1)
+	b.position(3900, crow, 9, 9)
+	b.despawn(4000, crow)
+	// The first client lost the crow and found it again under another
+	// address.
+	a.npc(crow, 1083, "Crow")
+	a.spawn(1010, crow)
+	a.position(1200, crow, 1, 1)
+	a.despawn(1400, crow)
+	a.l.Agents = append(a.l.Agents, evtc.Agent{Addr: a.base | 0x100 | crow, Profession: 1083, IsElite: 0xffffffff, Name: "Crow"})
+	a.second(2000, evtc.StateSpawn)
+	a.second(2500, evtc.StateEnterCombat)
+	a.second(3000, evtc.StateDespawn)
+	l, tl, _ := audited(t, s.logs(5000)...)
+	crows := agentsNamed(tl, "Crow")
+	if len(crows) != 1 || crows[0].Lifetime != iv(1000, 4000) || crows[0].Addr != a.addr(crow) {
+		t.Fatalf("crows = %v", crows)
+	}
+	if len(l.Agents) != 5 {
+		t.Errorf("%d agents listed", len(l.Agents))
+	}
+	if count(l, evtc.StateSpawn) != 1 || count(l, evtc.StateDespawn) != 1 {
+		t.Errorf("%d spawns, %d despawns", count(l, evtc.StateSpawn), count(l, evtc.StateDespawn))
 	}
 }
