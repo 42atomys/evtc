@@ -708,3 +708,223 @@ func TestJoinSplitEntry(t *testing.T) {
 		t.Errorf("%d spawns, %d despawns", count(l, evtc.StateSpawn), count(l, evtc.StateDespawn))
 	}
 }
+
+// TestJoinRefused checks that two entries a recording holds at the same
+// time are never one agent: by its own account they are two.
+func TestJoinRefused(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	b.npc(crow, 1083, "Crow")
+	b.spawn(1000, crow)
+	b.position(1100, crow, 1, 1)
+	b.position(4900, crow, 9, 9)
+	a.npc(crow, 1083, "Crow")
+	a.spawn(1000, crow)
+	a.position(1100, crow, 1, 1)
+	a.position(2900, crow, 5, 5)
+	a.l.Agents = append(a.l.Agents, evtc.Agent{Addr: a.base | 0x100 | crow, Profession: 1083, IsElite: 0xffffffff, Name: "Crow"})
+	a.second(2500, evtc.StateSpawn)
+	a.second(4000, evtc.StateEnterCombat)
+	_, tl, _ := audited(t, s.logs(5000)...)
+	if got := len(agentsNamed(tl, "Crow")); got != 2 {
+		t.Errorf("%d crows, want the two of the first recording", got)
+	}
+}
+
+// TestJoinLagged checks the client that learns late that an agent left,
+// when the next one of its instance id is there: the time its entry
+// shares with that one joins nothing.
+func TestJoinLagged(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		leaves  bool
+		lateOne int
+	}{
+		{"the late client is the second recording", true, 1},
+		{"the late client is the first recording", true, 0},
+		{"the other client wrote no leave", false, 0},
+	} {
+		s := newScene(2)
+		late, other := s.recs[tt.lateOne], s.recs[1-tt.lateOne]
+		s.each(func(r *recorder) {
+			r.npc(crow, 1083, "Crow")
+			r.l.Agents = append(r.l.Agents, evtc.Agent{Addr: r.base | 0x100 | crow, Profession: 1083, IsElite: 0xffffffff, Name: "Crow"})
+			r.spawn(1000, crow)
+			r.position(1100, crow, 1, 1)
+		})
+		if tt.leaves {
+			other.despawn(2000, crow)
+		}
+		other.second(2000, evtc.StateSpawn)
+		other.second(2100, evtc.StateEnterCombat)
+		late.despawn(2300, crow)
+		late.second(2310, evtc.StateSpawn)
+		late.second(2400, evtc.StateEnterCombat)
+		s.each(func(r *recorder) { r.second(4000, evtc.StateDespawn) })
+		_, tl, _ := audited(t, s.logs(5000)...)
+		crows := agentsNamed(tl, "Crow")
+		if len(crows) != 2 {
+			t.Errorf("%s: %d crows", tt.name, len(crows))
+			continue
+		}
+		if crows[0].Lifetime.Start != time.Second || crows[1].Lifetime != iv(2000, 4000) {
+			t.Errorf("%s: crows over %v and %v", tt.name, crows[0].Lifetime, crows[1].Lifetime)
+		}
+	}
+}
+
+// TestJoinStillHeld checks two agents that never moved and stand apart,
+// held at the same time by what the recordings guess: they stay two.
+func TestJoinStillHeld(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	a.gadget(cannon, 7307, "Cannon")
+	b.gadget(cannon, 7307, "Cannon")
+	a.position(1000, cannon, 100, 100)
+	b.spawn(3000, cannon)
+	b.position(3001, cannon, 900, 100)
+	logs := s.logs(5000)
+	// The first client tells nothing more of its cannon, not even that it
+	// stops holding it.
+	logs[0].Events = slices.DeleteFunc(logs[0].Events, func(e evtc.Event) bool {
+		return e.SrcAgent == a.addr(cannon) && e.IsStateChange == evtc.StateTeamChange
+	})
+	_, tl, _ := audited(t, logs...)
+	if got := len(agentsNamed(tl, "Cannon")); got != 2 {
+		t.Errorf("%d cannons", got)
+	}
+}
+
+// TestEntriesWithoutEvents checks that the entries without events of
+// another recording than the first are left out, players aside.
+func TestEntriesWithoutEvents(t *testing.T) {
+	s := newScene(2)
+	s.recs[0].npc(crow, 1083, "Crow")
+	s.recs[1].npc(pet, 6524, "Elemental")
+	s.recs[1].player(14, "Delta", ":Delta.3456", "2")
+	l, tl, _ := audited(t, s.logs(5000)...)
+	if len(agentsNamed(tl, "Crow")) != 1 || len(agentsNamed(tl, "Elemental")) != 0 || tl.PlayerByName("Delta") == nil {
+		t.Errorf("agents = %+v", l.Agents)
+	}
+}
+
+// TestCharacters checks the characters of a player who swapped: they
+// share the address of the player, whatever the recording that met them.
+func TestCharacters(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	// The second client alone saw Charlie come back as Delta.
+	b.player(charlie, "Delta", ":Charlie.9012", "2")
+	b.ev(3000, evtc.StateCombat, 0, boss, evtc.Event{SrcAgent: b.addr(charlie), SrcInstanceID: 77, SkillID: skillSlam, Value: 50, IFF: evtc.IFFFoe})
+	b.ev(3500, evtc.StateCombat, boss, 0, evtc.Event{DstAgent: b.addr(charlie), DstInstanceID: 77, SkillID: skillSlam, Value: 60, IFF: evtc.IFFFoe})
+	// Events of the player that name no character.
+	b.ev(3600, evtc.StateCombat, boss, 0, evtc.Event{DstAgent: b.addr(charlie), SkillID: skillSlam, Value: 70, IFF: evtc.IFFFoe})
+	b.ev(3700, evtc.StateHealthPctUpdate, 0, 0, evtc.Event{SrcAgent: b.addr(charlie), DstAgent: 9000})
+	l, tl, _ := audited(t, s.logs(5000)...)
+	p := tl.PlayerByAccount("Charlie.9012")
+	if p == nil || len(p.Characters()) != 2 || tl.Players().Count() != 3 {
+		t.Fatalf("players = %d, characters of Charlie = %v", tl.Players().Count(), p.Characters())
+	}
+	first, second := p.Characters()[0], p.Characters()[1]
+	if first.Name != "Charlie" || second.Name != "Delta" || first.Addr != a.addr(charlie) || second.Addr != a.addr(charlie) || second.InstanceID != 77 {
+		t.Errorf("characters = %v at %#x and %v at %#x", first.Name, first.Addr, second.Name, second.Addr)
+	}
+	if second.Hits().Count() != 1 || second.HitsTaken().Count() != 2 {
+		t.Errorf("Delta dealt %d hits and took %d", second.Hits().Count(), second.HitsTaken().Count())
+	}
+	if len(l.Agents) != 5 {
+		t.Errorf("%d agents listed", len(l.Agents))
+	}
+}
+
+// TestPlayersWithoutAccount checks the players of a public instance,
+// listed without account: the one another recording brings keeps an
+// address of its own.
+func TestPlayersWithoutAccount(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	a.player(40, "Guardian", "", "1")
+	a.player(42, "Warrior", "", "1")
+	a.hit(3000, 40, boss, skillSlam, 40)
+	a.hit(3050, 42, boss, skillSlam, 42)
+	b.player(41, "Necromancer", "", "1")
+	b.hit(3100, 41, boss, skillSlam, 41)
+	// Strikes that name the guardian by its address alone.
+	a.ev(3200, evtc.StateCombat, boss, 0, evtc.Event{DstAgent: a.addr(40), SkillID: skillSlam, Value: 70, IFF: evtc.IFFFoe})
+	a.ev(3300, evtc.StateCombat, 0, 42, evtc.Event{SrcAgent: a.addr(40), SkillID: skillSlam, Value: 80, IFF: evtc.IFFFoe})
+	_, tl, _ := audited(t, s.logs(5000)...)
+	g, w, n := agentsNamed(tl, "Guardian"), agentsNamed(tl, "Warrior"), agentsNamed(tl, "Necromancer")
+	if len(g) != 1 || len(w) != 1 || len(n) != 1 {
+		t.Fatalf("%d guardians, %d warriors, %d necromancers", len(g), len(w), len(n))
+	}
+	if g[0].Addr != a.addr(40) || w[0].Addr != a.addr(42) || n[0].Addr != b.addr(41) {
+		t.Errorf("guardian at %#x, warrior at %#x, necromancer at %#x", g[0].Addr, w[0].Addr, n[0].Addr)
+	}
+	if g[0].Hits().Count() != 2 || w[0].Hits().Count() != 1 || n[0].Hits().Count() != 1 {
+		t.Errorf("hits: %d of the guardian, %d of the warrior, %d of the necromancer", g[0].Hits().Count(), w[0].Hits().Count(), n[0].Hits().Count())
+	}
+	if g[0].HitsTaken().Count() != 1 || w[0].HitsTaken().Count() != 1 {
+		t.Errorf("hits taken: %d by the guardian, %d by the warrior", g[0].HitsTaken().Count(), w[0].HitsTaken().Count())
+	}
+}
+
+// TestAddressTaken checks that an agent another recording brings under
+// an address the first one uses gets an address of its own.
+func TestAddressTaken(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	a.npc(crow, 1083, "Crow")
+	a.spawn(1000, crow)
+	a.despawn(2000, crow)
+	for i, name := range []string{"Rat", "Bat", "Cat"} {
+		addr, id := []uint64{a.addr(crow), a.addr(boss), a.addr(crow) + 1}[i], uint16(40+i)
+		b.l.Agents = append(b.l.Agents, evtc.Agent{Addr: addr, Profession: uint32(1084 + i), IsElite: 0xffffffff, Name: name})
+		b.l.Events = append(b.l.Events,
+			evtc.Event{Time: b.at(1000), SrcAgent: addr, SrcInstanceID: id, IsStateChange: evtc.StateSpawn},
+			evtc.Event{Time: b.at(2000), SrcAgent: addr, SrcInstanceID: id, IsStateChange: evtc.StateDespawn})
+	}
+	_, tl, _ := audited(t, s.logs(5000)...)
+	rat, bat, cat := agentsNamed(tl, "Rat"), agentsNamed(tl, "Bat"), agentsNamed(tl, "Cat")
+	if len(rat) != 1 || len(bat) != 1 || len(cat) != 1 || len(agentsNamed(tl, "Crow")) != 1 {
+		t.Fatalf("rats %d, bats %d, cats %d", len(rat), len(bat), len(cat))
+	}
+	if rat[0].Addr != 0x7e00_0000_0000_0000 || bat[0].Addr != 0x7e00_0000_0000_0001 || cat[0].Addr != a.addr(crow)+1 {
+		t.Errorf("rat at %#x, bat at %#x, cat at %#x", rat[0].Addr, bat[0].Addr, cat[0].Addr)
+	}
+}
+
+// TestJoinSplitEntryStretched checks the entry an extension stretches: a
+// record of the healing addon names the address of the crow after it left,
+// while the recording holds the crow again under another address. The
+// life of an entry is that of the events of arcdps, so the two entries
+// follow each other and join the agent the other recording holds.
+func TestJoinSplitEntryStretched(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	b.npc(crow, 1083, "Crow")
+	b.spawn(1000, crow)
+	b.position(1100, crow, 1, 1)
+	b.position(3900, crow, 9, 9)
+	b.despawn(4000, crow)
+	a.npc(crow, 1083, "Crow")
+	a.spawn(1010, crow)
+	a.position(1200, crow, 1, 1)
+	a.despawn(1400, crow)
+	a.l.Agents = append(a.l.Agents, evtc.Agent{Addr: a.base | 0x100 | crow, Profession: 1083, IsElite: 0xffffffff, Name: "Crow"})
+	a.second(2000, evtc.StateSpawn)
+	a.second(2500, evtc.StateEnterCombat)
+	a.second(3000, evtc.StateDespawn)
+	// The addon writes the first address for the crow that came back.
+	s.each(func(r *recorder) {
+		r.ev(0, evtc.StateExtension, 0, 0, withID(evtc.Event{SrcAgent: 0x07000002_00000000 | healing, DstAgent: 0x32637239312e32}, healing))
+	})
+	a.heal(2200, alpha, crow, skillRegen, 300, 0x80)
+	l, tl, _ := audited(t, s.logs(5000)...)
+	crows := agentsNamed(tl, "Crow")
+	if len(crows) != 1 || crows[0].Lifetime != iv(1000, 4000) {
+		t.Fatalf("crows = %v", crows)
+	}
+	if count(l, evtc.StateSpawn) != 1 || count(l, evtc.StateDespawn) != 1 || count(l, evtc.StateExtensionCombat) != 1 {
+		t.Errorf("%d spawns, %d despawns, %d heals", count(l, evtc.StateSpawn), count(l, evtc.StateDespawn), count(l, evtc.StateExtensionCombat))
+	}
+}
