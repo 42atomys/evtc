@@ -308,3 +308,27 @@ func totalsOf(tl *timeline.Timeline) totals {
 func sortEvents(events []evtc.Event) {
 	slices.SortStableFunc(events, func(a, b evtc.Event) int { return cmp.Compare(at(&a), at(&b)) })
 }
+
+// older writes a log as the arcdps builds before 20260501 do: casts and
+// buff events are StateCombat events told apart by their other fields.
+func older(l *evtc.Log) *evtc.Log {
+	out := clone(l)
+	out.Header.Build = "20250913"
+	for i := range out.Events {
+		e := &out.Events[i]
+		switch e.IsStateChange {
+		case evtc.StateAnimationStart:
+			e.IsActivation, e.DstAgent, e.DstInstanceID = evtc.ActivationStartDefunc, 0, 0
+		case evtc.StateAnimationStop:
+			e.IsActivation = evtc.ActivationReset
+		case evtc.StateBuffApply:
+			e.Buff, e.IsShields = 1, 0
+		case evtc.StateBuffRemoveSingle, evtc.StateBuffRemoveAll:
+			e.Buff = 1
+		default:
+			continue
+		}
+		e.IsStateChange = evtc.StateCombat
+	}
+	return out
+}

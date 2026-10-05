@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/42atomys/evtc"
+	"github.com/42atomys/evtc/timeline"
 )
 
 // strikesOf returns the strikes of a skill in a log, in log order.
@@ -481,5 +482,264 @@ func TestDefinitions(t *testing.T) {
 	}
 	if len(l.Skills) != 5 || l.Skills[4].Name != "Blink" {
 		t.Errorf("skills = %+v", l.Skills)
+	}
+}
+
+// TestSpeakerDates checks that what happens to an agent is dated by the
+// client that speaks for it: the death another one dates falls between
+// two of its samples.
+func TestSpeakerDates(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) {
+		r.npc(crow, 1083, "Crow")
+		r.spawn(1000, crow)
+	})
+	a.ev(2040, evtc.StateChangeDead, crow, 0, evtc.Event{})
+	b.ev(2000, evtc.StateChangeDead, crow, 0, evtc.Event{})
+	a.despawn(2500, crow)
+	b.despawn(9000, crow)
+	l, _, m := audited(t, s.logs(10000)...)
+	got := of(l, evtc.StateChangeDead)
+	if len(got) != 1 || got[0].Time != a.at(2000) || got[0].SrcAgent != a.addr(crow) {
+		t.Errorf("deaths = %+v", got)
+	}
+	x := m.recs[0].entity[m.recs[0].tl.Agent(a.addr(crow))]
+	if len(x.speak) != 1 || x.speak[0].rec != 1 {
+		t.Errorf("speakers = %+v", x.speak)
+	}
+}
+
+// TestClampedLeave checks that a leave is never dated after the next
+// agent of its instance id came, when its recording does not know that
+// agent: written without address, it would name that one.
+func TestClampedLeave(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) {
+		r.npc(crow, 1083, "Crow")
+		r.spawn(1000, crow)
+		r.position(1100, crow, 1, 1)
+	})
+	a.despawn(2000, crow)
+	// The second client learns late that the crow left, and never meets
+	// the rat that took its instance id.
+	b.despawn(2400, crow)
+	a.l.Agents = append(a.l.Agents, evtc.Agent{Addr: a.base | 0x100 | crow, Profession: 1084, IsElite: 0xffffffff, Name: "Rat"})
+	rat := a.base | 0x100 | crow
+	a.l.Events = append(a.l.Events,
+		evtc.Event{Time: a.at(2200), SrcAgent: rat, SrcInstanceID: crow, IsStateChange: evtc.StateSpawn},
+		evtc.Event{Time: a.at(2300), SrcAgent: rat, SrcInstanceID: crow, IsStateChange: evtc.StateEnterCombat},
+		evtc.Event{Time: a.at(3000), SrcAgent: rat, SrcInstanceID: crow, IsStateChange: evtc.StateDespawn})
+	_, tl, _ := audited(t, s.logs(5000)...)
+	crows, rats := agentsNamed(tl, "Crow"), agentsNamed(tl, "Rat")
+	if len(crows) != 1 || len(rats) != 1 {
+		t.Fatalf("%d crows, %d rats", len(crows), len(rats))
+	}
+	if crows[0].Lifetime.End >= rats[0].Lifetime.Start || rats[0].Lifetime != iv(2200, 3000) {
+		t.Errorf("crow over %v, rat over %v", crows[0].Lifetime, rats[0].Lifetime)
+	}
+}
+
+// TestGivenAddress checks the events a client writes without address:
+// the combined log names the agent the timeline of the recording gave
+// them to.
+func TestGivenAddress(t *testing.T) {
+	s := newScene(2)
+	a := s.recs[0]
+	s.each(func(r *recorder) {
+		r.npc(crow, 1083, "Crow")
+		r.spawn(1000, crow)
+		r.position(1100, crow, 1, 1)
+		r.l.Events = append(r.l.Events, evtc.Event{Time: r.at(3000), SrcInstanceID: crow, IsStateChange: evtc.StateDespawn})
+	})
+	l, tl, _ := audited(t, s.logs(5000)...)
+	got := of(l, evtc.StateDespawn)
+	if len(got) != 1 || got[0].SrcAgent != a.addr(crow) || got[0].SrcInstanceID != crow {
+		t.Errorf("despawns = %+v", got)
+	}
+	if c := agentsNamed(tl, "Crow"); len(c) != 1 || c[0].Events().Of(evtc.StateDespawn).Count() != 1 {
+		t.Errorf("crows = %v", c)
+	}
+}
+
+// TestAgentsOfExtensions checks the agents an extension alone names, under
+// addresses of its own. The timeline gives an event written without
+// address to the last agent arcdps named under its instance id, never to
+// one of those: the combined log names the event after that agent.
+func TestAgentsOfExtensions(t *testing.T) {
+	s := newScene(2)
+	s.each(func(r *recorder) {
+		r.npc(crow, 1083, "Crow")
+		r.spawn(1000, crow)
+		r.position(1100, crow, 1, 1)
+		r.ev(2000, evtc.StateExtensionCombat, 0, bravo, withID(evtc.Event{SrcAgent: r.base | 0xdead, SrcInstanceID: crow, SkillID: skillRegen, Value: -900, IsOffcycle: 0x40}, healing))
+		r.l.Events = append(r.l.Events, evtc.Event{Time: r.at(3000), SrcInstanceID: crow, IsStateChange: evtc.StateDespawn})
+	})
+	logs := s.logs(5000)
+	if one := mustRecord(t, logs[0])[0].tl; one.Agent(s.recs[0].base|0xdead).Events().Of(evtc.StateDespawn).Count() != 0 {
+		t.Fatal("the timeline gives the despawn to the agent of the addon")
+	}
+	l, tl, m := audited(t, logs...)
+	checkInvariants(t, l, tl, m)
+	if got := of(l, evtc.StateDespawn); len(got) != 1 || got[0].SrcAgent != s.recs[0].addr(crow) || got[0].SrcInstanceID != crow {
+		t.Errorf("despawns = %+v", got)
+	}
+	if got := of(l, evtc.StateExtensionCombat); len(got) != 1 || got[0].SrcAgent != s.recs[0].base|0xdead {
+		t.Errorf("heals = %+v", got)
+	}
+}
+
+// TestUnknownAgents checks the events of agents no recording lists: they
+// pair by their instance id and keep no address.
+func TestUnknownAgents(t *testing.T) {
+	s := newScene(2)
+	s.each(func(r *recorder) {
+		r.ev(2500, evtc.StateCombat, bravo, 0, evtc.Event{DstInstanceID: 77, SkillID: skillSlam, Value: 700, IFF: evtc.IFFFoe})
+		r.ev(2600, evtc.StateCombat, 0, bravo, evtc.Event{SrcInstanceID: 77, SkillID: skillSlam, Value: 701, IFF: evtc.IFFFoe})
+		// A state and a tick of nobody.
+		r.l.Events = append(r.l.Events, evtc.Event{Time: r.at(2700), SrcInstanceID: 77, DstAgent: 5000, IsStateChange: evtc.StateHealthPctUpdate})
+		r.tick(2800, 0, charlie, 737, 60)
+	})
+	l, _, _ := audited(t, s.logs(5000)...)
+	got := strikesOf(l, skillSlam)
+	if len(got) != 2 || got[0].DstAgent != 0 || got[0].DstInstanceID != 77 || got[1].SrcAgent != 0 || got[1].SrcInstanceID != 77 {
+		t.Errorf("strikes = %+v", got)
+	}
+	if h := of(l, evtc.StateHealthPctUpdate); len(h) != 1 || h[0].SrcAgent != 0 || h[0].Time != s.recs[0].at(2700) {
+		t.Errorf("health updates = %+v", h)
+	}
+	ticks := 0
+	for _, e := range of(l, evtc.StateCombat) {
+		if e.Buff != 0 {
+			ticks++
+		}
+	}
+	if ticks != 1 {
+		t.Errorf("%d ticks", ticks)
+	}
+}
+
+// TestAddressOfNobody checks the address an event names in a field the
+// timeline reads no agent from, when no table lists it: the first
+// recording keeps what it wrote, the address of another one is left out,
+// and no agent another recording brings is listed at it.
+func TestAddressOfNobody(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	const nobody, other, source = 0x7777, 0x8888, 0x9999
+	effect := func(r *recorder, at uint64, addr uint64, id uint32) {
+		r.ev(at, evtc.StateEffectAgentCreate, alpha, 0, withID(evtc.Event{DstAgent: addr, DstInstanceID: 77, SkillID: skillHeat}, id))
+	}
+	// Both clients tell the first effect, each alone the next one.
+	effect(a, 2000, nobody, 1)
+	effect(b, 2000, other, 1)
+	effect(a, 2500, nobody, 2)
+	effect(b, 3000, other, 3)
+	// Creatures the second client lists at the addresses the first one
+	// named.
+	for i, addr := range []uint64{nobody, source} {
+		b.l.Agents = append(b.l.Agents, evtc.Agent{Addr: addr, Profession: 1083, IsElite: 0xffffffff, Name: "Crow"})
+		b.l.Events = append(b.l.Events,
+			evtc.Event{Time: b.at(1000), SrcAgent: addr, SrcInstanceID: crow + uint16(i), IsStateChange: evtc.StateSpawn},
+			evtc.Event{Time: b.at(4000), SrcAgent: addr, SrcInstanceID: crow + uint16(i), IsStateChange: evtc.StateDespawn})
+	}
+	logs := s.logs(5000)
+	// Before arcdps 20260501 a duration change names who extended the
+	// stack, which the timeline reads no agent from.
+	for i := range logs {
+		logs[i] = older(logs[i])
+	}
+	logs[0].Events = append(logs[0].Events, withID(evtc.Event{Time: a.at(3500), SrcAgent: source, SrcInstanceID: 78, DstAgent: a.addr(boss), DstInstanceID: boss,
+		SkillID: skillMight, Value: 5000, Buff: 1, IsOffcycle: 1}, 9))
+	l, tl, m := audited(t, logs...)
+	checkInvariants(t, l, tl, m)
+	got := of(l, evtc.StateEffectAgentCreate)
+	if len(got) != 3 || got[0].DstAgent != nobody || got[1].DstAgent != nobody || got[2].DstAgent != 0 || got[2].DstInstanceID != 77 {
+		t.Errorf("effects = %+v", got)
+	}
+	changes := 0
+	for _, e := range of(l, evtc.StateCombat) {
+		if kindOf(&e, false) == evtc.StateBuffChange {
+			if changes++; e.SrcAgent != source || e.SrcInstanceID != 78 {
+				t.Errorf("duration change = %+v", e)
+			}
+		}
+	}
+	if changes != 1 {
+		t.Errorf("%d duration changes", changes)
+	}
+	crows := agentsNamed(tl, "Crow")
+	if len(crows) != 2 {
+		t.Fatalf("%d crows", len(crows))
+	}
+	for _, c := range crows {
+		if c.Addr == nobody || c.Addr == source || c.Addr == 0 {
+			t.Errorf("a crow is listed at %#x", c.Addr)
+		}
+	}
+}
+
+// TestGivenNobody checks the agent of a recording that stands for no
+// agent of the combined log: its events name nobody.
+func TestGivenNobody(t *testing.T) {
+	s := newScene(2)
+	_, _, m := audited(t, s.logs(5000)...)
+	r := m.recs[1]
+	left, other := &timeline.Agent{Name: "Turret"}, &timeline.Agent{Name: "Cannon"}
+	r.unnamed[left] = true
+	if got := m.given(r, left); got.x != nil || got.addr != 0 || !got.unnamed {
+		t.Errorf("an agent left out = %+v", got)
+	}
+	if got := m.given(r, other); got.x != nil || got.addr != 0 || got.unnamed {
+		t.Errorf("an agent of no recording = %+v", got)
+	}
+}
+
+// TestPairNamesSource checks that a message names its source when one
+// client left it out, an extension the agent that was there.
+func TestPairNamesSource(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) {
+		r.npc(crow, 1083, "Crow")
+		r.spawn(1000, crow)
+		r.despawn(4000, crow)
+	})
+	a.ev(2500, evtc.StateCombat, 0, bravo, evtc.Event{SrcInstanceID: crow, SkillID: skillSlam, Value: 700, IFF: evtc.IFFFoe})
+	b.hit(2500, crow, bravo, skillSlam, 700)
+	// The addon of the first client names an address no table lists.
+	a.ev(3000, evtc.StateExtensionCombat, 0, bravo, withID(evtc.Event{SrcAgent: 0xdead, SrcInstanceID: crow, SkillID: skillRegen, Value: -900, IsOffcycle: 0x40}, healing))
+	b.heal(3000, crow, bravo, skillRegen, 900, 0x40)
+	l, _, _ := audited(t, s.logs(5000)...)
+	if got := strikesOf(l, skillSlam); len(got) != 1 || got[0].SrcAgent != a.addr(crow) {
+		t.Errorf("strikes = %+v", got)
+	}
+	if got := of(l, evtc.StateExtensionCombat); len(got) != 1 || got[0].SrcAgent != a.addr(crow) {
+		t.Errorf("heals = %+v", got)
+	}
+}
+
+// TestOwnerTellsBest checks that a buff event two clients tell is the one
+// of the client of the character.
+func TestOwnerTellsBest(t *testing.T) {
+	s := newScene(2)
+	s.recs[0].apply(2600, alpha, bravo, skillMight, 9000, 3)
+	s.recs[1].apply(2610, alpha, bravo, skillMight, 9100, 3)
+	s.recs[0].ev(2700, evtc.StateBuffDeactive, bravo, 0, withID(evtc.Event{Value: 8900}, 3))
+	s.recs[1].ev(2700, evtc.StateBuffDeactive, bravo, 0, withID(evtc.Event{Value: 8900}, 3))
+	s.each(func(r *recorder) {
+		r.ev(3000, evtc.StateBuffRemoveAll, bravo, 0, evtc.Event{SkillID: skillMight, IsBuffRemove: evtc.BuffRemoveAll})
+	})
+	l, tl, _ := audited(t, s.logs(5000)...)
+	got := of(l, evtc.StateBuffApply)
+	if len(got) != 1 || got[0].Value != 9100 || got[0].Time != s.recs[0].at(2610) || got[0].DstAgent != s.recs[0].addr(bravo) {
+		t.Errorf("stacks applied = %+v", got)
+	}
+	if count(l, evtc.StateBuffDeactive) != 1 || count(l, evtc.StateBuffRemoveAll) != 1 {
+		t.Errorf("%d deactivations, %d removals", count(l, evtc.StateBuffDeactive), count(l, evtc.StateBuffRemoveAll))
+	}
+	if st := tl.PlayerByName("Bravo").Ref().Stacks().All(); len(st) != 1 || st[0].Interval != iv(2610, 3000) {
+		t.Errorf("stacks = %v", st)
 	}
 }
