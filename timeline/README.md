@@ -655,7 +655,7 @@ accepts them.
 ## Not modeled
 
 Capture points (`GADGETCAPTURE*`), gadget models (`GADGETMODELINFO`),
-fly-to flights (`FLYTO`), WvW teams and objectives (`WVWTEAMS`,
-`WVWOBJECTIVESTATUS`) and the retired `RATEHEALTH` are only available as
-raw events. The graph does not guess which player a boss is chasing: the
-log carries no aggro information.
+fly-to flights (`FLYTO`), agent info (`AGENTINFO`), WvW teams and
+objectives (`WVWTEAMS`, `WVWOBJECTIVESTATUS`) and the retired `RATEHEALTH`
+are only available as raw events. The graph does not guess which player
+a boss is chasing: the log carries no aggro information.

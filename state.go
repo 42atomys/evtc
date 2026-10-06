@@ -358,12 +358,17 @@ const (
 	// StateFlyTo when a skill flies an agent to a location, the nova
 	// launch for one. A flight is a pair of events: the start carries the
 	// destination and is_flanking 1, the landing dst_agent 0 and
-	// is_flanking 0, about 880 ms later. The arcdps README does not list
-	// the kind, so the fields are measured on the logs of build 20260920.
-	// src_agent: agent, dst_agent: int16[3] x/y/z of the destination as
-	// the game coordinate divided by 10, then a fourth int16 from 20 to
-	// 260 (usually 100).
+	// is_flanking 0, about 880 ms later.
+	// src_agent: agent, dst_agent: int16[4] x/y/z of the destination and
+	// speed, all divided by 10 (the speed is 20 to 260, usually 100, in
+	// the logs of build 20260920).
 	StateFlyTo
+	// StateAgentInfo is client data about an agent, written as the game
+	// gives it. No log measured holds one yet: the fields are those of the
+	// arcdps README.
+	// src_agent: agent, value: type of a gadget, buff_dmg: species flags
+	// of an NPC.
+	StateAgentInfo
 	// StateUnknown is any type newer than this list.
 	StateUnknown
 )
@@ -458,6 +463,7 @@ var stateChangeNames = []string{
 	StateJump:                      "Jump",
 	StateGadgetModelInfo:           "GadgetModelInfo",
 	StateFlyTo:                     "FlyTo",
+	StateAgentInfo:                 "AgentInfo",
 	StateUnknown:                   "Unknown",
 }
 
