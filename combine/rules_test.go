@@ -138,10 +138,80 @@ func TestTracks(t *testing.T) {
 	}
 }
 
+func TestPayloads(t *testing.T) {
+	e := withID(evtc.Event{DstAgent: 7, Value: -2, BuffDamage: 3, OverstackValue: 4, SkillID: 5}, 0x04030201)
+	if trackable(&e) != 0x04030201 {
+		t.Errorf("trackable = %#x", trackable(&e))
+	}
+	if got := byTrackable(&e); got != (payload{0x04030201}) {
+		t.Errorf("byTrackable = %v", got)
+	}
+	if got := byDstValue(&e); got != (payload{7, 0xfffffffe}) {
+		t.Errorf("byDstValue = %v", got)
+	}
+	if byDst(&e) != (payload{7}) || byValue(&e) != (payload{0xfffffffe}) || noPayload(&e) != (payload{}) {
+		t.Error("payloads of one field")
+	}
+	if valDst(&e) != (state{7}) || valSkill(&e) != (state{5}) || valValue(&e) != (state{0xfffffffe}) || constant(9)(&e) != (state{9}) {
+		t.Error("values of one field")
+	}
+	// Everything but the time and the source tells two states apart.
+	base := whole(&e)
+	for _, other := range []evtc.Event{
+		{DstAgent: 8}, {Value: 1}, {BuffDamage: 1}, {OverstackValue: 1}, {SkillID: 1}, {IFF: 1}, {Buff: 1},
+		{Result: 1}, {IsActivation: 1}, {IsBuffRemove: 1}, {IsFlanking: 1}, {IsShields: 1}, {IsOffcycle: 1},
+	} {
+		if whole(&other) == (state{}) {
+			t.Errorf("whole reads nothing of %+v", other)
+		}
+	}
+	moved := e
+	moved.Time, moved.SrcAgent, moved.SrcInstanceID = 99, 0x1001, 11
+	if whole(&moved) != base {
+		t.Error("whole reads the time or the source")
+	}
+	old := evtc.Event{IsBuffRemove: 1, IsNinety: 2, IsFifty: 3, IsMoving: 4}
+	if legacyTrackable(&old) != 0x04030201 {
+		t.Errorf("legacyTrackable = %#x", legacyTrackable(&old))
+	}
+}
+
 func TestSlotMoving(t *testing.T) {
 	for sl := slotNone; sl <= slotMarker; sl++ {
 		if want := sl == slotPosition || sl == slotVelocity || sl == slotFacing; sl.moving() != want {
 			t.Errorf("slot %d moving = %v", sl, !want)
 		}
+	}
+}
+
+// TestKeys checks what names the messages of the kinds that carry more
+// than an id.
+func TestKeys(t *testing.T) {
+	e := withID(evtc.Event{SrcAgent: 1, DstAgent: 2, Value: 3, BuffDamage: 0x70004, OverstackValue: 5, Result: 6, Buff: 7, SkillID: 8}, 9)
+	old := evtc.Event{IsBuffRemove: 1, IsNinety: 2, IsFifty: 3, IsMoving: 4, DstAgent: 2, Buff: 1, Value: 3, IsOffcycle: 1}
+	tests := []struct {
+		name string
+		rule rule
+		e    *evtc.Event
+		want payload
+	}{
+		{"strike", rules[evtc.StateCombat], &e, payload{3, 0x70004, 5<<8 | 6}},
+		{"duration change", rules[evtc.StateBuffChange], &e, payload{9, 3}},
+		{"missile launch", rules[evtc.StateMissileLaunch], &e, payload{9, 3, 4}},
+		{"effect on the ground", rules[evtc.StateEffectGroundCreate], &e, payload{9, 2}},
+		{"effect of the older kind", rules[evtc.StateEffect2Defunc], &old, payload{0x04030201}},
+		{"effect of the older kind on an agent", ruleOf(&old, evtc.StateEffect2Defunc, true), &old, payload{0x04030201}},
+		{"ground marker", rules[evtc.StateSquadMarkerGround], &e, payload{1, 2}},
+		{"objective", rules[evtc.StateWvWObjectiveStatus], &e, payload{3, 0x70004, 7}},
+		{"duration change of the older format", ruleOf(&old, evtc.StateBuffChange, false), &e, payload{9, 3}},
+	}
+	for _, tt := range tests {
+		if got := tt.rule.key(tt.e); got != tt.want {
+			t.Errorf("%s: key = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+	// A marker is its id and whether it is a commander tag.
+	if got := rules[evtc.StateMarker].value(&e); got != (state{3, 7}) {
+		t.Errorf("marker = %v", got)
 	}
 }
