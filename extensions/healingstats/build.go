@@ -30,6 +30,11 @@ type record struct {
 	ev, peer *evtc.Event
 }
 
+// windows are the spans the two records of a heal are looked for within,
+// one after the other. The closest records pair first, so that a copy
+// that comes late leaves the record of another heal alone.
+var windows = [...]time.Duration{500 * time.Millisecond, 5 * time.Second, 20 * time.Second, PeerWindow}
+
 // peerKey identifies the game event behind a record, so that the two
 // records of one heal match: the same instance ids, skill, amounts and
 // kind. Instance ids rather than addresses, since the record shared by a
@@ -149,42 +154,23 @@ func (s *Stats) node(a *timeline.Agent) *Agent {
 }
 
 // merge collects the records of the extension in time order and pairs the
-// two records of a heal written by both clients: the record of one side
-// and the record of the other side that names the same game event within
-// PeerWindow, the earliest first. The record of the recording player's own
-// client is kept as the record of the heal.
+// two records of a heal written by both clients (pair). The record of the
+// recording player's own client is kept as the record of the heal.
 func (s *Stats) merge() []record {
 	tl := s.Timeline
 	events := s.Extension.Events()
 	recs := make([]record, 0, events.Count())
-	pending := map[peerKey][]int{}
-	window := uint64(PeerWindow / time.Millisecond)
 	for e := range events.Seq() {
-		side := e.IsOffcycle & (flagFromSrc | flagFromDst)
-		if side != flagFromSrc && side != flagFromDst {
-			recs = append(recs, record{ev: e})
-			continue
-		}
-		k := peerKey{e.SrcInstanceID, e.DstInstanceID, e.SkillID, e.Value, e.BuffDamage, e.Buff, e.IsShields}
-		list := pending[k]
-		for len(list) > 0 && e.Time-recs[list[0]].ev.Time > window {
-			list = list[1:]
-		}
-		matched := false
-		for i, ri := range list {
-			if recs[ri].ev.IsOffcycle&(flagFromSrc|flagFromDst) != side {
-				recs[ri].peer = e
-				list = slices.Delete(list, i, i+1)
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			recs = append(recs, record{ev: e})
-			list = append(list, len(recs)-1)
-		}
-		pending[k] = list
+		recs = append(recs, record{ev: e})
 	}
+	pair(recs)
+	held := recs[:0]
+	for _, r := range recs {
+		if r.ev != nil {
+			held = append(held, r)
+		}
+	}
+	recs = held
 	if tl.POV != nil {
 		pov := tl.POV.Ref()
 		for i := range recs {
@@ -198,6 +184,100 @@ func (s *Stats) merge() []record {
 		slices.SortStableFunc(recs, func(a, b record) int { return cmp.Compare(a.ev.Time, b.ev.Time) })
 	}
 	return recs
+}
+
+// pair pairs the two records of the heals both clients wrote: a record
+// written by one client and the one the other client wrote of the same
+// game event, within each of the windows in turn, the earliest first. The
+// later record of a pair leaves recs and becomes the peer of the earlier
+// one.
+func pair(recs []record) {
+	const both = flagFromSrc | flagFromDst
+	// The game events the records written by one client name, with the
+	// number of their records and the clients that wrote them.
+	events := map[peerKey]int32{}
+	of := make([]int32, len(recs))
+	var counts []int
+	var sides []uint8
+	for i, r := range recs {
+		e := r.ev
+		side := e.IsOffcycle & both
+		if side != flagFromSrc && side != flagFromDst {
+			of[i] = -1
+			continue
+		}
+		k := peerKey{e.SrcInstanceID, e.DstInstanceID, e.SkillID, e.Value, e.BuffDamage, e.Buff, e.IsShields}
+		g, ok := events[k]
+		if !ok {
+			g = int32(len(counts))
+			events[k] = g
+			counts, sides = append(counts, 0), append(sides, 0)
+		}
+		of[i] = g
+		counts[g]++
+		sides[g] |= side
+	}
+	// Only the events both clients wrote hold pairs: their records, in
+	// time order, from one arena.
+	total := 0
+	for g, n := range counts {
+		if sides[g] == both {
+			total += n
+		}
+	}
+	if total == 0 {
+		return
+	}
+	arena := make([]int32, total)
+	lists := make([][]int32, len(counts))
+	for g, n := range counts {
+		if sides[g] == both {
+			lists[g] = carve(&arena, n)
+		}
+	}
+	for i, g := range of {
+		if g >= 0 && sides[g] == both {
+			lists[g] = append(lists[g], int32(i))
+		}
+	}
+
+	// waiting holds the records still alone that the next one may pair
+	// with, from the index from on, and alone counts those of each
+	// client, the one of the destination first: a wider window is tried
+	// while both have some.
+	var waiting []int32
+	for _, list := range lists {
+		for _, w := range windows {
+			window := uint64(w / time.Millisecond)
+			waiting = waiting[:0]
+			from, alone := 0, [2]int{}
+			for _, i := range list {
+				r := &recs[i]
+				if r.ev == nil || r.peer != nil {
+					continue
+				}
+				side := r.ev.IsOffcycle & both
+				for from < len(waiting) && r.ev.Time-recs[waiting[from]].ev.Time > window {
+					from++
+				}
+				j := from
+				for j < len(waiting) && recs[waiting[j]].ev.IsOffcycle&both == side {
+					j++
+				}
+				if j == len(waiting) {
+					waiting = append(waiting, i)
+					alone[side>>7]++
+					continue
+				}
+				recs[waiting[j]].peer, r.ev = r.ev, nil
+				waiting = append(waiting[:j], waiting[j+1:]...)
+				alone[1-side>>7]--
+			}
+			if alone[0] == 0 || alone[1] == 0 {
+				break
+			}
+		}
+	}
 }
 
 // local reports whether e was written by the client of the recording

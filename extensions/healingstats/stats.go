@@ -15,10 +15,10 @@ const Signature = timeline.ExtensionHealingStats
 const SupportedRevision = 2
 
 // PeerWindow is how far apart the two records of one heal may be when the
-// clients of both parties wrote it: the record of the recording player's
-// own client comes first and the copy shared by the squad member follows
-// within a few hundred milliseconds.
-const PeerWindow = 500 * time.Millisecond
+// clients of both parties wrote it. The recording client writes its own
+// record at once and the copy a squad member shares when it comes: within
+// a few hundred milliseconds for most, after tens of seconds for some.
+const PeerWindow = time.Minute
 
 // Stats is the healing graph of a log: every heal and barrier the healing
 // stats addon wrote, linked to the agents, skills and casts of the
