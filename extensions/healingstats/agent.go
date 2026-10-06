@@ -25,6 +25,9 @@ type Agent struct {
 	// does not list, adopted the agents that took this one as master.
 	master  *Agent
 	adopted []*Agent
+	// writes is set when a client wrote heals the agent dealt, or heals of
+	// a minion it names the agent as the master of.
+	writes bool
 
 	heals, healsTaken, healsCredited []*Heal
 	cnt                              struct{ heals, taken, adopted int }

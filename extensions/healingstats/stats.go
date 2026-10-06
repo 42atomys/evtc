@@ -3,6 +3,7 @@ package healingstats
 import (
 	"time"
 
+	"github.com/42atomys/evtc"
 	"github.com/42atomys/evtc/timeline"
 )
 
@@ -50,6 +51,11 @@ type Stats struct {
 	// source and the client of their destination, whose two records were
 	// merged into one heal.
 	Merged int
+	// LeftOut lists the records behind no heal, in time order: those the
+	// client of a destination wrote of a heal the client of its source did
+	// not tell, although it writes the heals it deals. The addon counts a
+	// heal by the record of the client of its source.
+	LeftOut []*evtc.Event
 
 	agents []*Agent
 	// players are the nodes of the characters of the players.

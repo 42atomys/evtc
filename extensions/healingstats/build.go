@@ -24,10 +24,11 @@ const (
 	flagFromSrc = 1 << 7
 )
 
-// record holds the event of one heal and, when the clients of both
-// parties wrote it, the peer event.
+// record holds the event of one heal, its parties and, when the clients
+// of both parties wrote it, the peer event.
 type record struct {
 	ev, peer *evtc.Event
+	src, dst *Agent
 }
 
 // windows are the spans the two records of a heal are looked for within,
@@ -131,17 +132,6 @@ func (s *Stats) adoptBy(n *Agent, master uint16, t time.Duration) bool {
 	return true
 }
 
-// ownerOf is owner for a timeline agent.
-func (s *Stats) ownerOf(a *timeline.Agent) *timeline.Agent {
-	switch {
-	case a.Master != nil:
-		return a.Master
-	case a.Raw == nil:
-		return s.node(a).owner().Agent
-	}
-	return a
-}
-
 // nodes returns every node, the Unknown one last.
 func (s *Stats) nodes() []*Agent { return append(slices.Clone(s.agents), s.Unknown) }
 
@@ -153,9 +143,14 @@ func (s *Stats) node(a *timeline.Agent) *Agent {
 	return s.Unknown
 }
 
-// merge collects the records of the extension in time order and pairs the
-// two records of a heal written by both clients (pair). The record of the
-// recording player's own client is kept as the record of the heal.
+// merge collects the records of the extension and returns one per heal,
+// in time order. A heal counts once, by the record of the client of its
+// source, as in the windows of the addon; the record of the client of the
+// destination counts when the client of the source writes nothing. The
+// two records of a heal written by both clients are paired to date it:
+// the record of the recording player's own client, written at once, is
+// kept as the record of the heal. The records of a destination left
+// without the record of the source go to LeftOut.
 func (s *Stats) merge() []record {
 	tl := s.Timeline
 	events := s.Extension.Events()
@@ -164,25 +159,48 @@ func (s *Stats) merge() []record {
 		recs = append(recs, record{ev: e})
 	}
 	pair(recs)
+
+	var pov *timeline.Agent
+	if tl.POV != nil {
+		pov = tl.POV.Ref()
+	}
 	held := recs[:0]
 	for _, r := range recs {
-		if r.ev != nil {
-			held = append(held, r)
+		if r.ev == nil {
+			continue
+		}
+		if r.peer != nil && pov != nil && !s.local(r.ev, pov) && s.local(r.peer, pov) {
+			r.ev, r.peer = r.peer, r.ev
+		}
+		src, dst := s.parties(r.ev)
+		r.src, r.dst = s.node(src), s.node(dst)
+		s.mark(r.ev, r.src, r.dst)
+		if r.peer != nil {
+			s.mark(r.peer, r.src, r.dst)
+		}
+		held = append(held, r)
+	}
+
+	n := 0
+	for _, r := range held {
+		if s.leftOut(r) {
+			n++
 		}
 	}
-	recs = held
-	if tl.POV != nil {
-		pov := tl.POV.Ref()
-		for i := range recs {
-			r := &recs[i]
-			if r.peer != nil && !s.local(r.ev, pov) && s.local(r.peer, pov) {
-				r.ev, r.peer = r.peer, r.ev
-			}
-		}
-		// The record of the recording client can be the later one: restore
-		// the time order.
-		slices.SortStableFunc(recs, func(a, b record) int { return cmp.Compare(a.ev.Time, b.ev.Time) })
+	if n > 0 {
+		s.LeftOut = make([]*evtc.Event, 0, n)
 	}
+	recs = held[:0]
+	for _, r := range held {
+		if s.leftOut(r) {
+			s.LeftOut = append(s.LeftOut, r.ev)
+			continue
+		}
+		recs = append(recs, r)
+	}
+	// The record of the recording client can be the later one: restore the
+	// time order.
+	slices.SortStableFunc(recs, func(a, b record) int { return cmp.Compare(a.ev.Time, b.ev.Time) })
 	return recs
 }
 
@@ -280,16 +298,64 @@ func pair(recs []record) {
 	}
 }
 
+// teller returns the node of the agent whose client wrote a side of the
+// record e, a being the agent of that side and master the instance id e
+// names as its master: the agent of that instance id, a itself when e
+// names none or one the log does not know. The master the timeline gives
+// a may be the one of another agent, since the addon may write the address
+// of an agent that left for the one that took its instance id.
+func (s *Stats) teller(a *Agent, master uint16, e *evtc.Event) *Agent {
+	tl := s.Timeline
+	if master == 0 {
+		return a
+	}
+	if m := s.byAgent[tl.AgentAt(master, tl.TimeOf(e))]; m != nil && m != s.Unknown {
+		return m
+	}
+	return a
+}
+
+// mark notes what the record e tells of the clients that run the addon,
+// src and dst being its parties. The side whose client wrote e is
+// recorded, with the master e names for it, and the client of a source
+// writes the heals it deals. The Unknown sentinel has no client.
+func (s *Stats) mark(e *evtc.Event, src, dst *Agent) {
+	if e.IsOffcycle&flagFromSrc != 0 {
+		for _, a := range [...]*Agent{src, s.teller(src, e.SrcMasterInstanceID, e)} {
+			if a != s.Unknown {
+				a.Recorded, a.writes = true, true
+			}
+		}
+	}
+	if e.IsOffcycle&flagFromDst != 0 {
+		for _, a := range [...]*Agent{dst, s.teller(dst, e.DstMasterInstanceID, e)} {
+			if a != s.Unknown {
+				a.Recorded = true
+			}
+		}
+	}
+}
+
+// leftOut reports whether r is the record the client of a destination
+// wrote of a heal the client of its source did not tell, although it
+// writes the heals its player or the minions of its player deal.
+func (s *Stats) leftOut(r record) bool {
+	if r.peer != nil || r.ev.IsOffcycle&(flagFromSrc|flagFromDst) != flagFromDst {
+		return false
+	}
+	return r.src.writes || s.teller(r.src, r.ev.SrcMasterInstanceID, r.ev).writes
+}
+
 // local reports whether e was written by the client of the recording
 // player: the flags name a side of the event and that side is the player
 // or one of its minions.
 func (s *Stats) local(e *evtc.Event, pov *timeline.Agent) bool {
 	src, dst := s.parties(e)
-	return (e.IsOffcycle&flagFromSrc != 0 && s.ownerOf(src) == pov) ||
-		(e.IsOffcycle&flagFromDst != 0 && s.ownerOf(dst) == pov)
+	return (e.IsOffcycle&flagFromSrc != 0 && s.teller(s.node(src), e.SrcMasterInstanceID, e).Agent == pov) ||
+		(e.IsOffcycle&flagFromDst != 0 && s.teller(s.node(dst), e.DstMasterInstanceID, e).Agent == pov)
 }
 
-// agents returns the source and the destination of a record. The addon
+// parties returns the source and the destination of a record. The addon
 // rewrites the addresses of the records a squad member shares through its
 // own agent table, which misses some agents (minions, allied NPCs): the
 // address is then 0 or one the log never declares, while the instance id
@@ -329,13 +395,12 @@ func (s *Stats) fill(recs []record) {
 	for i, r := range recs {
 		e := r.ev
 		h := &arena[i]
-		src, dst := s.parties(e)
 		*h = Heal{
 			Event:        e,
 			PeerEvent:    r.peer,
 			Time:         tl.TimeOf(e),
-			Src:          s.node(src),
-			Dst:          s.node(dst),
+			Src:          r.src,
+			Dst:          r.dst,
 			Skill:        tl.Skill(e.SkillID),
 			IsBarrier:    e.IsShields != 0,
 			IsBuff:       e.Buff != 0,
@@ -383,7 +448,7 @@ func carve[T any](arena *[]T, n int) []T {
 	return out
 }
 
-// finish derives the credited heals, the casts and the recorded agents.
+// finish derives the credited heals, the casts and the recorded players.
 func (s *Stats) finish() {
 	nodes := s.nodes()
 
@@ -419,16 +484,8 @@ func (s *Stats) finish() {
 		}
 	}
 
-	// Recorded agents: the sides that wrote heals, with their masters, and
-	// the recording player, whose client registered the addon.
-	for _, h := range s.heals {
-		if h.SrcRecorded {
-			s.markRecorded(h.Src)
-		}
-		if h.DstRecorded {
-			s.markRecorded(h.Dst)
-		}
-	}
+	// Recorded players: those the records marked and the recording player,
+	// whose client registered the addon.
 	if pov := s.Timeline.POV; pov != nil {
 		s.byAgent[pov.Ref()].Recorded = true
 	}
@@ -475,14 +532,4 @@ func (s *Stats) attachCasts(a *Agent) {
 		}
 		h.Cast = last[h.Skill.ID]
 	}
-}
-
-// markRecorded marks a node and its master as recorded; the Unknown
-// sentinel never is.
-func (s *Stats) markRecorded(a *Agent) {
-	if a == s.Unknown {
-		return
-	}
-	a.Recorded = true
-	a.owner().Recorded = true
 }

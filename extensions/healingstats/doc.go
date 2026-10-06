@@ -20,6 +20,6 @@
 // Only the recording player and the squad members sharing their stats with
 // it write events, each for the heals it dealt or received; the heals of
 // everyone else are known only when one of them received them. A heal
-// between two such players is written by both clients and the package
-// merges the two records into one heal.
+// between two such players is written by both clients and counts once, by
+// the record of the client of its source, as in the windows of the addon.
 package healingstats
