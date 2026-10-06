@@ -743,3 +743,242 @@ func TestOwnerTellsBest(t *testing.T) {
 		t.Errorf("stacks = %v", st)
 	}
 }
+
+// TestStoppedEarly checks the end of the squad combat of a client that
+// stopped to record before the other one: the fight goes on, whichever of
+// the two is read first.
+func TestStoppedEarly(t *testing.T) {
+	for early := range 2 {
+		s := newScene(2)
+		logs := s.logs(5000)
+		for i := range logs[early].Events {
+			if e := &logs[early].Events[i]; e.Time == s.recs[early].at(5000) {
+				e.Time -= 2500
+			}
+		}
+		l, tl, _ := audited(t, logs...)
+		if got := of(l, evtc.StateSquadCombatEnd); len(got) != 1 || got[0].Time != rawEpoch+5000 || tl.Duration != 5*time.Second {
+			t.Errorf("recording %d stopped early: ends = %+v", early, got)
+		}
+	}
+}
+
+// TestStoppedBetweenFights checks the logs that hold several fights: the
+// squad left combat and came back to it. The end a client wrote as its log
+// ended, while the other one went on, tells nothing of the squad.
+func TestStoppedBetweenFights(t *testing.T) {
+	for early := range 2 {
+		s := newScene(2)
+		s.each(func(r *recorder) {
+			r.ev(2000, evtc.StateSquadCombatEnd, 0, 0, evtc.Event{SrcAgent: 0x637261, Value: 1787685625})
+			r.ev(3000, evtc.StateSquadCombatStart, 0, 0, evtc.Event{SrcAgent: 0x637261, Value: 1787685626, BuffDamage: 1787685627})
+		})
+		logs := s.logs(8000)
+		for i := range logs[early].Events {
+			if e := &logs[early].Events[i]; e.Time == s.recs[early].at(8000) {
+				e.Time -= 3500
+			}
+		}
+		l, tl, _ := audited(t, logs...)
+		var starts, ends []uint64
+		for _, e := range of(l, evtc.StateSquadCombatStart) {
+			starts = append(starts, e.Time-rawEpoch)
+		}
+		for _, e := range of(l, evtc.StateSquadCombatEnd) {
+			ends = append(ends, e.Time-rawEpoch)
+		}
+		if !slices.Equal(starts, []uint64{0, 3000}) || !slices.Equal(ends, []uint64{2000, 8000}) || tl.Duration != 8*time.Second {
+			t.Errorf("recording %d stopped early: starts %v, ends %v, over %v", early, starts, ends, tl.Duration)
+		}
+	}
+}
+
+// TestLeaveInTwoEvents checks the two events of a leave, of which a
+// client whose log ends writes one: both stand where the last client saw
+// the agent leave.
+func TestLeaveInTwoEvents(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) {
+		r.npc(crow, 1083, "Crow")
+		r.spawn(1000, crow)
+	})
+	a.leave(4000, crow)
+	a.despawn(4000, crow)
+	b.leave(4040, crow)
+	l, _, _ := audited(t, s.logs(5000)...)
+	for _, e := range l.Events {
+		if e.SrcAgent == a.addr(crow) && isLeave(&e, e.IsStateChange) && e.Time != rawEpoch+4040 {
+			t.Errorf("%v at %d", e.IsStateChange, e.Time-rawEpoch)
+		}
+	}
+	if count(l, evtc.StateDespawn) != 1 {
+		t.Errorf("%d despawns", count(l, evtc.StateDespawn))
+	}
+}
+
+// TestWeaponSetBefore checks what a weapon set was before the first swap
+// a client tells: the change that names it is kept once per entry.
+func TestWeaponSetBefore(t *testing.T) {
+	s := newScene(2)
+	s.each(func(r *recorder) {
+		r.ev(2000, evtc.StateWeaponSwap, bravo, 0, evtc.Event{DstAgent: 5, Value: 4})
+		r.ev(3000, evtc.StateWeaponSwap, bravo, 0, evtc.Event{DstAgent: 4, Value: 5})
+	})
+	l, tl, m := audited(t, s.logs(5000)...)
+	if count(l, evtc.StateWeaponSwap) != 2 {
+		t.Errorf("%d weapon swaps", count(l, evtc.StateWeaponSwap))
+	}
+	p := tl.PlayerByName("Bravo").Ref()
+	if p.WeaponSetAt(time.Second) != 4 || p.WeaponSetAt(2500*time.Millisecond) != 5 {
+		t.Errorf("weapon sets = %d then %d", p.WeaponSetAt(time.Second), p.WeaponSetAt(2500*time.Millisecond))
+	}
+	for entry, b := range m.before {
+		if was, ok := b[slotWeaponSet]; !ok || len(b) != 1 || was.t != 2*time.Second || was.c.value != (state{4}) {
+			t.Errorf("entry %d: before = %+v", entry, b)
+		}
+	}
+	if len(m.before) != 2 {
+		t.Errorf("%d entries tell what a weapon set was", len(m.before))
+	}
+}
+
+// TestStateOfAgentNotSeen checks the state a client writes without
+// address of an agent it never met: it is the state of the agent another
+// client held then.
+func TestStateOfAgentNotSeen(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	a.npc(crow, 1083, "Crow")
+	a.spawn(1000, crow)
+	a.despawn(4000, crow)
+	b.l.Events = append(b.l.Events,
+		evtc.Event{Time: b.at(3000), SrcInstanceID: crow, IsStateChange: evtc.StateDespawn},
+		evtc.Event{Time: b.at(3100), SrcInstanceID: crow, IsStateChange: evtc.StateChangeDead})
+	l, tl, _ := audited(t, s.logs(5000)...)
+	if got := of(l, evtc.StateDespawn); len(got) != 1 || got[0].Time != a.at(4000) {
+		t.Errorf("despawns = %+v", got)
+	}
+	// The death is told by the second client alone, without address.
+	if got := of(l, evtc.StateChangeDead); len(got) != 1 || got[0].SrcAgent != 0 || got[0].SrcInstanceID != crow {
+		t.Errorf("deaths = %+v", got)
+	}
+	if c := agentsNamed(tl, "Crow"); len(c) != 1 || len(c[0].Deaths) != 1 {
+		t.Errorf("crows = %v", c)
+	}
+}
+
+// TestEntityAt checks the lookups of an agent by its instance id.
+func TestEntityAt(t *testing.T) {
+	first := &entity{id: 1, holds: []hold{{life: iv(1000, 2000)}}}
+	second := &entity{id: 2, holds: []hold{{life: iv(2600, 4000)}}}
+	m := &combiner{byInst: map[uint16][]*entity{crow: {first, second}}}
+	at := func(v int) time.Duration { return time.Duration(v) * time.Millisecond }
+	for _, tt := range []struct {
+		t        int
+		at, held *entity
+	}{
+		{0, first, nil},
+		{1500, first, first},
+		{2200, first, first},
+		{2500, second, first},
+		{3000, second, second},
+		{4900, second, second},
+		{5100, nil, nil},
+	} {
+		if got := m.entityAt(crow, at(tt.t)); got != tt.at {
+			t.Errorf("entityAt(%d ms) = %v", tt.t, got)
+		}
+		if got := m.entityHeld(crow, at(tt.t)); got != tt.held {
+			t.Errorf("entityHeld(%d ms) = %v", tt.t, got)
+		}
+	}
+	if m.entityAt(99, 0) != nil || m.entityHeld(99, 0) != nil {
+		t.Error("an instance id nobody carried names an agent")
+	}
+}
+
+// TestStateOfNobody checks the states written without address of an
+// agent no recording held then: they stay the states of nobody.
+func TestStateOfNobody(t *testing.T) {
+	s := newScene(2)
+	s.each(func(r *recorder) {
+		r.l.Events = append(r.l.Events, evtc.Event{Time: r.at(2000), SrcInstanceID: 77, IsStateChange: evtc.StateDespawn})
+	})
+	l, tl, _ := audited(t, s.logs(5000)...)
+	got := of(l, evtc.StateDespawn)
+	if len(got) != 1 || got[0].SrcAgent != 0 || got[0].SrcInstanceID != 77 {
+		t.Errorf("despawns = %+v", got)
+	}
+	if tl.Agents().Where(func(a *timeline.Agent) bool { return a.InstanceID == 77 }).Count() != 0 {
+		t.Error("the despawn made an agent")
+	}
+}
+
+// TestStateOfNobodyAlone checks the states of nobody a client tells after
+// the first one stopped to record: nobody else tells them.
+func TestStateOfNobodyAlone(t *testing.T) {
+	s := newScene(2)
+	s.each(func(r *recorder) {
+		r.l.Events = append(r.l.Events, evtc.Event{Time: r.at(2000), SrcInstanceID: 77, DstAgent: 5000, IsStateChange: evtc.StateHealthPctUpdate})
+	})
+	b := s.recs[1]
+	b.l.Events = append(b.l.Events, evtc.Event{Time: b.at(4000), SrcInstanceID: 77, DstAgent: 4000, IsStateChange: evtc.StateHealthPctUpdate})
+	logs := s.logs(5000)
+	for i := range logs[0].Events {
+		if e := &logs[0].Events[i]; e.Time == s.recs[0].at(5000) {
+			e.Time -= 2000
+		}
+	}
+	l, _, _ := audited(t, logs...)
+	if got := healths(l); !sameHealths(got, [2]uint64{2000, 50}, [2]uint64{4000, 40}) {
+		t.Errorf("health updates = %v", got)
+	}
+}
+
+// TestStartedLate checks the recording of a client that started late: the
+// other one tells the start of the fight, whichever of the two is read
+// first.
+func TestStartedLate(t *testing.T) {
+	for late := range 2 {
+		s := newScene(2)
+		s.each(func(r *recorder) {
+			for i := range 30 {
+				r.hit(uint64(3000+50*i), bravo, boss, skillSlam, int32(2000+i))
+			}
+			for at := uint64(500); at < 6000; at += 1000 {
+				r.ev(at, evtc.StateTick, 0, 0, evtc.Event{SrcAgent: 25, Value: 40})
+			}
+		})
+		logs := s.logs(6000)
+		// The client started to record at two and a half seconds: it wrote
+		// then the start of the squad combat and what it writes about its
+		// recording.
+		r := s.recs[late]
+		l := logs[late]
+		l.Events = slices.DeleteFunc(l.Events, func(e evtc.Event) bool {
+			return e.Time < r.at(2500) && e.IsStateChange != evtc.StatePointOfView && e.IsStateChange != evtc.StateLanguage && e.IsStateChange != evtc.StateSquadCombatStart
+		})
+		for i := range l.Events {
+			if e := &l.Events[i]; e.Time < r.at(2500) {
+				if e.Time = r.at(2500); e.IsStateChange == evtc.StateSquadCombatStart {
+					e.Value, e.BuffDamage = e.Value+2, e.BuffDamage+2
+				}
+			}
+		}
+		out, tl, _ := audited(t, logs...)
+		if got := of(out, evtc.StateSquadCombatStart); len(got) != 1 || got[0].Time != rawEpoch || tl.Duration != 6*time.Second {
+			t.Errorf("recording %d started late: starts = %+v over %v", late, got, tl.Duration)
+		}
+		var ticks []uint64
+		for _, e := range of(out, evtc.StateTick) {
+			ticks = append(ticks, e.Time-rawEpoch)
+		}
+		if !slices.Equal(ticks, []uint64{500, 1500, 2500, 3500, 4500, 5500}) {
+			t.Errorf("recording %d started late: ticks at %v", late, ticks)
+		}
+		if n := len(strikesOf(out, skillHeat)) + len(strikesOf(out, skillSlam)); n != 70 || count(out, evtc.StatePointOfView) != 1 {
+			t.Errorf("recording %d started late: %d strikes, %d points of view", late, n, count(out, evtc.StatePointOfView))
+		}
+	}
+}
