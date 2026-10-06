@@ -68,6 +68,7 @@ const (
 	slotGuild
 	slotAttackTarget
 	slotModel
+	slotInfo
 	// slotMarker is a set: one marker per event, 0 empties the set.
 	slotMarker
 )
@@ -277,6 +278,7 @@ var rules = map[evtc.StateChange]rule{
 		return state{u32(e.Value), uint64(e.Buff)}
 	}),
 	evtc.StateGadgetModelInfo:           client(slotModel, whole),
+	evtc.StateAgentInfo:                 client(slotInfo, whole),
 	evtc.StateGadgetCaptureOutlineShow:  client(slotNone, nil),
 	evtc.StateGadgetCaptureSplitPercent: client(slotNone, nil),
 	evtc.StateGadgetCaptureOutlineHide:  client(slotNone, nil),
@@ -377,7 +379,7 @@ func tracks(k evtc.StateChange) bool {
 		evtc.StateWeaponSwap, evtc.StateTeamChange, evtc.StateStealthChange, evtc.StateGlider,
 		evtc.StateTransformation, evtc.StateStunBreak, evtc.StateMarker, evtc.StateGuild,
 		evtc.StateJump, evtc.StateGadgetAnimation, evtc.StateGadgetName,
-		evtc.StateGadgetModelInfo:
+		evtc.StateGadgetModelInfo, evtc.StateAgentInfo:
 		return true
 	}
 	return false
