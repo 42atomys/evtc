@@ -174,6 +174,8 @@ const (
 	CapabilityGadgetModels
 	// CapabilityFlyTo when fly-to flights are written (StateFlyTo).
 	CapabilityFlyTo
+	// CapabilityAgentInfo when agent info is written (StateAgentInfo).
+	CapabilityAgentInfo
 
 	capabilityCount
 )
@@ -244,6 +246,7 @@ var capabilityTable = [capabilityCount]capabilityInfo{
 	CapabilityPing:                 {name: "Ping", build: 20260915},
 	CapabilityGadgetModels:         {name: "GadgetModels", build: 20260915, kinds: []StateChange{StateGadgetModelInfo}},
 	CapabilityFlyTo:                {name: "FlyTo", build: 20260920, kinds: []StateChange{StateFlyTo}},
+	CapabilityAgentInfo:            {name: "AgentInfo", build: 20260929, kinds: []StateChange{StateAgentInfo}},
 }
 
 // String returns the name of the capability, without its Capability

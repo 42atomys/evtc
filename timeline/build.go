@@ -1535,7 +1535,7 @@ func tracksAgent(k evtc.StateChange) bool {
 		evtc.StateWeaponSwap, evtc.StateTeamChange, evtc.StateStealthChange, evtc.StateGlider,
 		evtc.StateTransformation, evtc.StateStunBreak, evtc.StateMarker, evtc.StateGuild,
 		evtc.StateJump, evtc.StateGadgetAnimation, evtc.StateGadgetName,
-		evtc.StateGadgetModelInfo:
+		evtc.StateGadgetModelInfo, evtc.StateAgentInfo:
 		return true
 	}
 	return false
