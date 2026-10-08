@@ -228,7 +228,7 @@ func extensions(tl *timeline.Timeline) {
 	for _, p := range h.Recorded {
 		recorded = append(recorded, p.Name)
 	}
-	fmt.Printf("healing stats %s (format revision %d): %d heals, %d written by both clients\n", h.Version, h.Revision, h.Heals().Count(), h.Merged)
+	fmt.Printf("healing stats %s (format revision %d): %d heals, %d written by both clients, %d records left out\n", h.Version, h.Revision, h.Heals().Count(), h.Merged, len(h.LeftOut))
 	fmt.Printf("complete for %s; of the other players, only the heals exchanged with them are known\n", strings.Join(recorded, ", "))
 	w := table()
 	fmt.Fprintln(w, "player\theals\thealing\thps\tbarrier\tself\ton downed\treceived\trecorded")
