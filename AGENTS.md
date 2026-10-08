@@ -18,6 +18,7 @@ outside the standard library. `cmd/` holds one small command.
 | `cmd/evtcparser/`          | Tiny command printing a log summary.                                                                                                                                                                                                                   |
 | `examples/sabetha/`        | A full raid report written with the public API only. Run it after API changes: `go run ./examples/sabetha`.                                                                                                                                            |
 | `tests_fixtures/`          | Sample logs (`*.zevtc`), used by integration tests when present. Not part of the API.                                                                                                                                                                  |
+| `docs/`                    | `format-history.md`: how the log format changed since 2016, with the dates behind `capabilityTable` and `defects`.                                                                                                                                     |
 
 Read `timeline/README.md` first: model table, conventions, cookbook and the
 table "What is read from the log" that maps every arcdps state change to
