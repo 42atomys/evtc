@@ -1,6 +1,7 @@
 package combine
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -335,5 +336,229 @@ func TestOrder(t *testing.T) {
 	}
 	if before(sorted[3], sorted[3]) != 0 {
 		t.Error("an event comes before itself")
+	}
+}
+
+// TestStackOwnNumbers checks the numbers given to the stacks whose own is
+// taken: each gets one no open stack carries.
+func TestStackOwnNumbers(t *testing.T) {
+	st := newStacks()
+	st.holder[firstOwn] = stackKey{wearer: 9}
+	st.holder[firstOwn+1] = stackKey{wearer: 9}
+	if got := st.fresh(); got != firstOwn+2 {
+		t.Errorf("number = %d, want %d", got, firstOwn+2)
+	}
+	if got := st.fresh(); got != firstOwn+3 {
+		t.Errorf("number = %d, want %d", got, firstOwn+3)
+	}
+
+	// An event about a stack the combined log does not hold, under a
+	// number another client gave: it names no stack of the log.
+	open := &cand{e: withID(evtc.Event{SkillID: skillMight, Time: 1000}, 5), ent: 1, entry: 1, origin: 0, stack: stackOpens}
+	st.settle(open)
+	for _, c := range []*cand{
+		{e: withID(evtc.Event{SkillID: skillRegen}, 5), ent: 2, origin: 1, stack: stackChanges},
+		{e: evtc.Event{DstAgent: 5}, ent: 2, origin: 1, stack: stackActive},
+	} {
+		st.settle(c)
+		if id := trackable(&c.e) + c.e.DstAgent; id < firstOwn {
+			t.Errorf("event of role %d numbered %d", c.stack, id)
+		}
+	}
+	// The client that opened the stack names it as it did.
+	same := &cand{e: withID(evtc.Event{SkillID: skillMight}, 5), ent: 1, origin: 0, stack: stackDeactive}
+	st.settle(same)
+	if trackable(&same.e) != 5 {
+		t.Errorf("event numbered %d", trackable(&same.e))
+	}
+}
+
+// TestStatesOfTwoEntries checks the state two entries tell with the same
+// value, long apart: what the second one tells is an event of its log.
+func TestStatesOfTwoEntries(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) { r.npc(crow, 1083, "Crow") })
+	a.spawn(1000, crow)
+	a.health(1500, crow, 80)
+	a.despawn(3000, crow)
+	b.spawn(2000, crow)
+	b.health(3600, crow, 80)
+	b.despawn(4000, crow)
+	l, _, _ := audited(t, s.logs(5000)...)
+	if got := healths(l); !sameHealths(got, [2]uint64{1500, 80}, [2]uint64{3600, 80}) {
+		t.Errorf("health updates = %v", got)
+	}
+}
+
+// TestWasWhileThere checks that what a state was is left out while the
+// agent is there: the first change the combined log holds tells it.
+func TestWasWhileThere(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) { r.npc(crow, 1083, "Crow") })
+	a.spawn(1000, crow)
+	a.team(1200, crow, 7, 0)
+	a.despawn(3000, crow)
+	b.spawn(2000, crow)
+	b.team(3500, crow, 5, 7)
+	b.despawn(4000, crow)
+	l, _, _ := audited(t, s.logs(5000)...)
+	var got [][2]uint64
+	for _, e := range of(l, evtc.StateTeamChange) {
+		if e.SrcAgent == a.addr(crow) && e.DstAgent != 0 {
+			got = append(got, [2]uint64{e.Time - rawEpoch, e.DstAgent})
+		}
+	}
+	if len(got) != 2 || got[0] != [2]uint64{1200, 7} || got[1] != [2]uint64{3500, 5} {
+		t.Errorf("team changes = %v", got)
+	}
+}
+
+// TestStacksOnGainApplied checks a stack applied just after a client
+// gained the agent, which the client that held the agent tells at the same
+// instant: it is that application, not a stack told at the gain.
+func TestStacksOnGainApplied(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) { r.npc(crow, 1083, "Crow") })
+	a.spawn(1000, crow)
+	a.apply(1500, alpha, crow, skillMight, 9000, 5)
+	b.spawn(2500, crow)
+	b.initial(2501, alpha, crow, skillMight, 8000, 5)
+	// Applied 200 ms after the gain and removed at once, seen by both: the
+	// stack is closed when the copy of the second client comes.
+	a.apply(2700, bravo, crow, skillRegen, 4000, 6)
+	a.remove(2701, crow, skillRegen, 6)
+	b.apply(2703, bravo, crow, skillRegen, 4000, 6)
+	b.remove(2704, crow, skillRegen, 6)
+	// The same 2 s later, told at the gain by neither.
+	a.apply(4700, bravo, crow, skillRegen, 4000, 7)
+	b.apply(4697, bravo, crow, skillRegen, 4000, 7)
+	s.each(func(r *recorder) { r.despawn(9000, crow) })
+	l, tl, _ := audited(t, s.logs(10000)...)
+	if n := count(l, evtc.StateBuffApply) + count(l, evtc.StateBuffInitial); n != 3 || count(l, evtc.StateBuffRemoveSingle) != 1 {
+		t.Errorf("%d stacks opened and %d closed, want 3 and 1", n, count(l, evtc.StateBuffRemoveSingle))
+	}
+	stacks := agentsNamed(tl, "Crow")[0].Stacks().All()
+	var starts []time.Duration
+	for _, st := range stacks {
+		starts = append(starts, st.Interval.Start)
+	}
+	if want := []time.Duration{1500 * time.Millisecond, 2700 * time.Millisecond, 4700 * time.Millisecond}; !slices.Equal(starts, want) {
+		t.Errorf("stacks start at %v, want %v", starts, want)
+	}
+	// Read the other way round, the application stands as well.
+	logs := s.logs(10000)
+	slices.Reverse(logs)
+	l, _, _ = audited(t, logs...)
+	if n := count(l, evtc.StateBuffApply) + count(l, evtc.StateBuffInitial); n != 3 {
+		t.Errorf("read the other way, %d stacks opened, want 3", n)
+	}
+}
+
+// TestLeaveTellsTeam checks the team a leave tells when the client that
+// held the agent last never learned it: the one before the first change
+// the entries that knew it told, or their last change.
+func TestLeaveTellsTeam(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		change bool
+		want   uint32
+	}{{"the team held", false, 2643}, {"the team changed", true, 7}} {
+		s := newScene(2)
+		a, b := s.recs[0], s.recs[1]
+		s.each(func(r *recorder) { r.npc(crow, 1083, "Crow") })
+		a.spawn(1000, crow)
+		a.hit(1500, crow, boss, skillSlam, 50)
+		had := uint32(2643)
+		if tt.change {
+			a.team(2000, crow, 7, 2643)
+			had = 7
+		}
+		a.team(4000, crow, 0, had)
+		a.despawn(4000, crow)
+		b.spawn(3000, crow)
+		b.hit(3500, crow, boss, skillSlam, 60)
+		b.leave(6000, crow)
+		b.despawn(6000, crow)
+		for _, logs := range [][]*evtc.Log{s.logs(7000), {b.l, a.l}} {
+			l, tl, _ := audited(t, logs...)
+			var leaves []evtc.Event
+			for _, e := range l.Events {
+				if e.IsStateChange == evtc.StateTeamChange && e.SrcInstanceID == crow && e.DstAgent == 0 {
+					leaves = append(leaves, e)
+				}
+			}
+			if len(leaves) != 1 || uint32(leaves[0].Value) != tt.want {
+				t.Errorf("%s: leaves = %+v", tt.name, leaves)
+			}
+			crows := agentsNamed(tl, "Crow")
+			if len(crows) != 1 || crows[0].TeamAt(crows[0].Lifetime.Start+2*time.Second) != tt.want || crows[0].TeamAt(crows[0].Lifetime.Start+4*time.Second) != tt.want {
+				t.Errorf("%s: crows = %v", tt.name, crows)
+			}
+		}
+	}
+}
+
+// TestMasterNamedByAnotherEntry checks the master of a minion that only
+// an entry that does not speak for it names, while the master is there:
+// the first state that entry tells with it is kept, the others dropped.
+// When the speaker names the master, in an event the combined log keeps,
+// nothing of the other entry is.
+func TestMasterNamedByAnotherEntry(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		later bool
+		want  []time.Duration
+	}{
+		{"the speaker never names it", false, []time.Duration{1001 * time.Millisecond, 3001 * time.Millisecond}},
+		{"the speaker names it later", true, []time.Duration{1001 * time.Millisecond, 3500 * time.Millisecond}},
+	} {
+		s := newScene(2)
+		a, b := s.recs[0], s.recs[1]
+		s.each(func(r *recorder) {
+			r.npc(pet, 6524, "Elemental")
+			r.npc(crow, 1083, "Crow")
+			r.spawn(2500, crow)
+			r.hit(2600, crow, boss, skillSlam, 40)
+		})
+		a.spawn(1000, pet)
+		a.ev(1001, evtc.StateMaxHealthUpdate, pet, 0, evtc.Event{DstAgent: 6342})
+		a.hit(1500, pet, boss, skillSlam, 50)
+		// The second client gains the minion knowing whose it is.
+		b.spawn(3000, pet)
+		b.ev(3001, evtc.StateMaxHealthUpdate, pet, 0, evtc.Event{DstAgent: 6342, SrcMasterInstanceID: crow})
+		b.ev(3001, evtc.StateTargetable, pet, 0, evtc.Event{DstAgent: 1, SrcMasterInstanceID: crow})
+		if tt.later {
+			a.ev(3500, evtc.StateMaxHealthUpdate, pet, 0, evtc.Event{DstAgent: 6342, SrcMasterInstanceID: crow})
+		}
+		s.each(func(r *recorder) { r.despawn(4000, pet) })
+		for _, logs := range [][]*evtc.Log{s.logs(5000), {b.l, a.l}} {
+			l, tl, _ := audited(t, logs...)
+			if pets := agentsNamed(tl, "Elemental"); len(pets) != 1 || pets[0].Master == nil || pets[0].Master.Name != "Crow" {
+				t.Errorf("%s: pets = %v", tt.name, pets)
+			}
+			var health []time.Duration
+			targetable := 0
+			for i := range l.Events {
+				e := &l.Events[i]
+				if e.SrcInstanceID != pet {
+					continue
+				}
+				switch e.IsStateChange {
+				case evtc.StateMaxHealthUpdate:
+					health = append(health, tl.TimeOf(e).Round(time.Millisecond))
+					if tl.TimeOf(e) > 2*time.Second && e.SrcMasterInstanceID != crow {
+						t.Errorf("%s: the max health update at %v names no master", tt.name, tl.TimeOf(e))
+					}
+				case evtc.StateTargetable:
+					targetable++
+				}
+			}
+			if !slices.Equal(health, tt.want) || targetable != 0 {
+				t.Errorf("%s: max health updates at %v and %d targetable changes, want %v and 0", tt.name, health, targetable, tt.want)
+			}
+		}
 	}
 }
