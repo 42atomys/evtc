@@ -179,3 +179,161 @@ func TestStackEndsByDespawn(t *testing.T) {
 		t.Errorf("removal numbered %d, %d stacks open", trackable(&c.e), len(st.open))
 	}
 }
+
+// TestStatesToldAgain checks the states a client tells of an agent it
+// has just gained: the combined log holds them.
+func TestStatesToldAgain(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) { r.npc(crow, 1083, "Crow") })
+	a.spawn(1000, crow)
+	a.health(1500, crow, 80)
+	a.despawn(2000, crow)
+	// The second client holds the crow the longest and speaks for it
+	// from the time it gains it.
+	b.spawn(1900, crow)
+	b.health(1901, crow, 80)
+	b.health(3000, crow, 80)
+	b.health(3500, crow, 70)
+	b.despawn(9000, crow)
+	l, _, _ := audited(t, s.logs(10000)...)
+	if got := healths(l); !sameHealths(got, [2]uint64{1500, 80}, [2]uint64{3000, 80}, [2]uint64{3500, 70}) {
+		t.Errorf("health updates = %v", got)
+	}
+}
+
+// TestStatesToldTwice checks the state a client tells twice with the same
+// value, a moment apart, around the time it starts to speak for the agent:
+// the first telling is the one the client that spoke before dated, the
+// second one is another event.
+func TestStatesToldTwice(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) {
+		r.npc(crow, 1083, "Crow")
+		r.spawn(1000, crow)
+		r.health(1500, crow, 90)
+		r.health(2900, crow, 80)
+	})
+	a.despawn(3000, crow)
+	b.health(3200, crow, 80)
+	b.health(3300, crow, 70)
+	b.despawn(3400, crow)
+	l, _, m := audited(t, s.logs(5000)...)
+	if x := m.recs[0].entity[m.recs[0].tl.Agent(a.addr(crow))]; len(x.speak) != 2 || x.speak[0].rec != 0 || x.speak[1].rec != 1 {
+		t.Fatalf("speakers = %+v", x.speak)
+	}
+	if got := healths(l); !sameHealths(got, [2]uint64{1500, 90}, [2]uint64{2900, 80}, [2]uint64{3200, 80}, [2]uint64{3300, 70}) {
+		t.Errorf("health updates = %v", got)
+	}
+
+	// The second client dates the last telling of the first one after the
+	// first one left: the same telling, once.
+	s = newScene(2)
+	a, b = s.recs[0], s.recs[1]
+	s.each(func(r *recorder) {
+		r.npc(crow, 1083, "Crow")
+		r.spawn(1000, crow)
+		r.health(1500, crow, 90)
+	})
+	a.health(2990, crow, 80)
+	a.despawn(3000, crow)
+	b.health(3005, crow, 80)
+	b.health(3300, crow, 70)
+	b.despawn(3400, crow)
+	l, _, _ = audited(t, s.logs(5000)...)
+	if got := healths(l); !sameHealths(got, [2]uint64{1500, 90}, [2]uint64{2990, 80}, [2]uint64{3300, 70}) {
+		t.Errorf("health updates = %v", got)
+	}
+}
+
+// TestStatesAfterLeave checks that what an agent was is told again when
+// it comes back.
+func TestStatesAfterLeave(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) { r.npc(crow, 1083, "Crow") })
+	a.spawn(1000, crow)
+	a.health(1500, crow, 80)
+	a.despawn(2000, crow)
+	b.spawn(3000, crow)
+	b.health(3001, crow, 80)
+	b.despawn(9000, crow)
+	l, _, _ := audited(t, s.logs(10000)...)
+	if got := healths(l); !sameHealths(got, [2]uint64{1500, 80}, [2]uint64{3001, 80}) {
+		t.Errorf("health updates = %v", got)
+	}
+}
+
+// TestMarkersToldAgain checks the markers a client tells of an agent
+// another one spoke for: the same ones are told again, other ones
+// replace them.
+func TestMarkersToldAgain(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		second []int32
+		want   []int32
+	}{
+		{"the same markers", []int32{0, 3, 4}, []int32{0, 3, 4}},
+		{"another marker", []int32{0, 5}, []int32{0, 3, 4, 0, 5}},
+		{"a marker on top", []int32{3, 6}, []int32{0, 3, 4, 6}},
+	} {
+		s := newScene(2)
+		a, b := s.recs[0], s.recs[1]
+		s.each(func(r *recorder) { r.npc(crow, 1083, "Crow") })
+		a.spawn(1000, crow)
+		for _, v := range []int32{0, 3, 4} {
+			a.marker(1500, crow, v)
+		}
+		a.despawn(2000, crow)
+		b.spawn(1900, crow)
+		for _, v := range tt.second {
+			b.marker(1901, crow, v)
+		}
+		b.despawn(9000, crow)
+		l, _, _ := audited(t, s.logs(10000)...)
+		var got []int32
+		for _, e := range of(l, evtc.StateMarker) {
+			got = append(got, e.Value)
+		}
+		if len(got) != len(tt.want) {
+			t.Errorf("%s: markers = %v, want %v", tt.name, got, tt.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tt.want[i] {
+				t.Errorf("%s: markers = %v, want %v", tt.name, got, tt.want)
+				break
+			}
+		}
+	}
+}
+
+// TestOrder checks the order of the events of one instant: those of a
+// recording keep theirs, a spawn the recordings date otherwise comes
+// first and a leave last.
+func TestOrder(t *testing.T) {
+	at := func(time uint64, origin int8, seq int, c cand) cand {
+		c.e.Time, c.e.IsStateChange, c.origin, c.seq = time, evtc.StateSpawn, origin, seq
+		return c
+	}
+	sorted := []cand{
+		{e: evtc.Event{Time: 9999, IsStateChange: evtc.StateBuffInfo}},
+		at(1000, 0, 7, cand{}),
+		at(2000, 1, 9, cand{bound: -1, moved: true}),
+		at(2000, 1, 3, cand{carried: true}),
+		at(2000, 0, 4, cand{bound: -1}),
+		at(2000, 0, 5, cand{bound: 1}),
+		at(2000, 1, 2, cand{}),
+		at(2000, 0, 1, cand{bound: 1, moved: true}),
+		at(3000, 1, 0, cand{}),
+	}
+	for i := 1; i < len(sorted); i++ {
+		if before(sorted[i-1], sorted[i]) >= 0 || before(sorted[i], sorted[i-1]) <= 0 {
+			t.Errorf("events %d and %d are not in order", i-1, i)
+		}
+	}
+	if before(sorted[3], sorted[3]) != 0 {
+		t.Error("an event comes before itself")
+	}
+}
