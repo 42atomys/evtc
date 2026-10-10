@@ -3,6 +3,7 @@ package combine
 import (
 	"cmp"
 	"fmt"
+	"math"
 	"slices"
 	"testing"
 	"time"
@@ -109,6 +110,12 @@ func checkInvariants(tb testing.TB, l *evtc.Log, tl *timeline.Timeline, m *combi
 	if left := unpaired(m); left != 0 {
 		tb.Errorf("%d pairs left unmade", left)
 	}
+}
+
+// String names an agent of the combined log for the messages of the
+// tests: its kind, its address and its instance id.
+func (x *entity) String() string {
+	return fmt.Sprintf("%s %#x (%d)", x.kind, x.addr, x.inst)
 }
 
 // naming is an agent of the combined log, by its address, and an instance
@@ -347,6 +354,36 @@ type margins struct {
 	inversions int
 }
 
+// add counts the pairs of a run. The events of extensions are left out:
+// they reach a client seconds late, and pair in their order.
+func (g *margins) add(m *combiner) {
+	for k, gaps := range m.audit.gaps {
+		if k == evtc.StateExtensionCombat {
+			continue
+		}
+		for _, d := range gaps {
+			g.pairs++
+			g.furthest = max(g.furthest, d)
+			for i, w := range [3]time.Duration{30 * time.Millisecond, 100 * time.Millisecond, 500 * time.Millisecond} {
+				if d <= w {
+					g.within[i]++
+				}
+			}
+		}
+	}
+	for k, alone := range m.audit.alone {
+		if k == evtc.StateExtensionCombat {
+			continue
+		}
+		for _, d := range alone {
+			if d <= 5*time.Second {
+				g.doubtful++
+			}
+		}
+	}
+	g.inversions += inversions(m)
+}
+
 // inversions counts the pairs of messages of the server that the two
 // recordings order the other way: sorted by the time one recording gave
 // them, two pairs in a row whose other times go backwards. Pairs dated at
@@ -373,4 +410,200 @@ func (g margins) String() string {
 	share := func(n int) float64 { return 100 * float64(n) / float64(max(g.pairs, 1)) }
 	return fmt.Sprintf("%d pairs, dated within 30 ms %.2f%%, 100 ms %.2f%%, 500 ms %.3f%%, the furthest %v apart; %d messages left alone within 5 s of one of their content; %d pairs of messages of the server out of order",
 		g.pairs, share(g.within[0]), share(g.within[1]), share(g.within[2]), g.furthest.Round(time.Millisecond), g.doubtful, g.inversions)
+}
+
+// fact is what an event tells, in the addresses of the combined log: two
+// events of other recordings that tell the same fact a moment apart are
+// one event told twice. The run pairs on other grounds, the agents and
+// the keys of the rules, so that the count is a second opinion.
+type fact struct {
+	kind     evtc.StateChange
+	tick     bool
+	src, dst uint64
+	si, di   uint16
+	skill    uint32
+	p        [4]uint64
+}
+
+// toldTwice counts the facts two recordings tell within near of each
+// other in a combined log.
+func toldTwice(l *evtc.Log, m *combiner, near time.Duration) int {
+	type told struct {
+		t      uint64
+		origin int8
+	}
+	typed := m.recs[0].typed
+	facts := map[fact][]told{}
+	for i := range l.Events {
+		e := &l.Events[i]
+		if !timed(e.IsStateChange) {
+			continue
+		}
+		k := kindOf(e, typed)
+		r := ruleOf(e, k, typed)
+		f := fact{kind: k, tick: k == evtc.StateCombat && e.Buff != 0, skill: e.SkillID}
+		if r.src {
+			f.src, f.si = e.SrcAgent, e.SrcInstanceID
+		}
+		if r.dst {
+			f.dst, f.di = e.DstAgent, e.DstInstanceID
+		}
+		switch r.class {
+		case classServer:
+			p := r.key(e)
+			f.p = [4]uint64{p[0], p[1], p[2]}
+			if !r.keySrc {
+				f.src, f.si = 0, 0
+			}
+			if !r.keyDst {
+				f.dst, f.di = 0, 0
+			}
+		case classBound:
+		case classClient:
+			f.p = [4]uint64{u32(e.Value), u32(e.BuffDamage), uint64(e.OverstackValue), uint64(e.Result)}
+			if r.value != nil {
+				f.p = r.value(e)
+			}
+		case classExtension:
+			f.p = [4]uint64{u32(e.Value), u32(e.BuffDamage), uint64(e.OverstackValue), uint64(e.IsOffcycle)<<8 | uint64(e.IsShields)}
+		default:
+			continue
+		}
+		facts[f] = append(facts[f], told{e.Time, m.audit.origin[i]})
+	}
+	n := 0
+	for _, l := range facts {
+		for i := 1; i < len(l); i++ {
+			if l[i].origin != l[i-1].origin && l[i].t-l[i-1].t <= uint64(near/time.Millisecond) {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// stateCheck counts, state by state, the instants at which a combined
+// timeline was compared with a recording and those at which they differ.
+type stateCheck struct {
+	compared, differ map[string]int
+	notes            []string
+}
+
+func (c *stateCheck) add(name string, same bool, note func() string) {
+	c.compared[name]++
+	if !same {
+		if c.differ[name]++; c.differ[name] <= 2 {
+			c.notes = append(c.notes, name+": "+note())
+		}
+	}
+}
+
+// total returns the number of comparisons and of differences.
+func (c *stateCheck) total() (compared, differ int) {
+	for _, v := range c.compared {
+		compared += v
+	}
+	for _, v := range c.differ {
+		differ += v
+	}
+	return
+}
+
+// skillID returns the id of a skill, 0 for none.
+func skillID(s *timeline.Skill) uint32 {
+	if s == nil {
+		return 0
+	}
+	return s.ID
+}
+
+// states samples every agent of every recording twice a second over the
+// spans where that recording speaks for the agent, and compares what it
+// tells with the combined timeline. Two recordings date a change some
+// hundreds of milliseconds apart: the combined timeline agrees when it
+// tells the value of the recording at the instant or a moment around it.
+func states(tl *timeline.Timeline, m *combiner) *stateCheck {
+	c := &stateCheck{compared: map[string]int{}, differ: map[string]int{}}
+	const step, around = 500 * time.Millisecond, 600 * time.Millisecond
+	zero := time.Duration(m.recs[0].epoch-epoch(tl)) * time.Millisecond
+	for ri, r := range m.recs {
+		for a := range r.tl.Agents().Seq() {
+			x := r.entity[a]
+			if x == nil || a.Lifetime.Duration() <= 0 {
+				continue
+			}
+			ma := tl.AgentOf(x.addr, a.InstanceID)
+			if ma == nil || ma == tl.Unknown {
+				// An address no table lists, which an extension wrote.
+				c.add("agent found", a.Raw == nil, func() string { return fmt.Sprintf("%s %q of recording %d", a.Kind, a.Name, ri) })
+				continue
+			}
+			if of := masterOf(r, a); of != nil {
+				// The master may be listed anew in the combined log while
+				// the minion stays: the master is the agent of its
+				// instance id then.
+				want := r.entity[of]
+				c.add("master", want != nil && ma.Master != nil && ma.Master.InstanceID == want.inst && ma.Master.Kind == want.kind, func() string {
+					return fmt.Sprintf("%s %q (%d) of recording %d", a.Kind, a.Name, a.InstanceID, ri)
+				})
+			}
+			// The changes of life the combined log holds of the agent: one
+			// before the entry began is one the speaker was not there to
+			// see, an agent dead before a client gained it is alive to
+			// that client.
+			var changes []time.Duration
+			for _, k := range []evtc.StateChange{evtc.StateChangeDead, evtc.StateChangeDown, evtc.StateChangeUp} {
+				for _, e := range ma.Events().Of(k).All() {
+					changes = append(changes, tl.TimeOf(e))
+				}
+			}
+			slices.Sort(changes)
+			began := a.Lifetime.Start - r.off + zero
+			saw := func(at time.Duration) bool {
+				j, _ := slices.BinarySearch(changes, at+1)
+				return j == 0 || changes[j-1] >= began
+			}
+			n := 0
+			for ts := a.Lifetime.Start + step/2; ts < a.Lifetime.End && n < 2000; ts += step {
+				n++
+				tp := ts - r.off
+				if sp := x.speaker(tp); sp == nil || sp.entry != r.entry[a] {
+					continue
+				}
+				at := tp + zero
+				check := func(name string, known bool, same func(t time.Duration) bool) {
+					if !known {
+						return
+					}
+					c.add(name, same(at) || same(at-around) || same(at+around), func() string {
+						return fmt.Sprintf("%s %q (%d) of recording %d at %v", a.Kind, a.Name, a.InstanceID, ri, ts.Round(time.Millisecond))
+					})
+				}
+				near := func(x, y float64) bool { return math.Abs(x-y) <= 0.5 }
+				check("life", saw(at), func(t time.Duration) bool { return a.LifeStateAt(ts) == ma.LifeStateAt(t) })
+				check("in combat", true, func(t time.Duration) bool { return a.IsInCombatAt(ts) == ma.IsInCombatAt(t) })
+				check("targetable", a.Targetable.Len() > 0, func(t time.Duration) bool { return a.IsTargetableAt(ts) == ma.IsTargetableAt(t) })
+				check("team", a.TeamAt(ts) != 0, func(t time.Duration) bool { return a.TeamAt(ts) == ma.TeamAt(t) })
+				check("weapon set", a.WeaponSetAt(ts) != 0, func(t time.Duration) bool { return a.WeaponSetAt(ts) == ma.WeaponSetAt(t) })
+				check("stealth", a.Stealth.Len() > 0, func(t time.Duration) bool { return a.StealthAt(ts) == ma.StealthAt(t) })
+				check("defiance state", a.Defiance.Len() > 0, func(t time.Duration) bool { return a.DefianceStateAt(ts) == ma.DefianceStateAt(t) })
+				check("defiance percent", a.DefiancePercent.Len() > 0, func(t time.Duration) bool { return near(a.DefiancePercentAt(ts), ma.DefiancePercentAt(t)) })
+				check("health", a.Health.Len() > 0, func(t time.Duration) bool { return near(a.HealthAt(ts), ma.HealthAt(t)) })
+				check("barrier", a.Barrier.Len() > 0, func(t time.Duration) bool { return near(a.BarrierAt(ts), ma.BarrierAt(t)) })
+				check("max health", a.MaxHealth.Len() > 0, func(t time.Duration) bool { return a.MaxHealthAt(ts) == ma.MaxHealthAt(t) })
+				check("position", a.Position.Len() > 0, func(t time.Duration) bool { return a.PositionAt(ts).DistTo(ma.PositionAt(t)) <= 50 })
+				check("gliding", true, func(t time.Duration) bool { return a.IsGlidingAt(ts) == ma.IsGlidingAt(t) })
+				check("name visible", a.NameVisible.Len() > 0, func(t time.Duration) bool { return a.IsNameVisibleAt(ts) == ma.IsNameVisibleAt(t) })
+				check("transformation", true, func(t time.Duration) bool { return skillID(a.TransformationAt(ts)) == skillID(ma.TransformationAt(t)) })
+				check("squad marker", true, func(t time.Duration) bool { return a.SquadMarkerAt(ts) == ma.SquadMarkerAt(t) })
+				check("commander", true, func(t time.Duration) bool { return a.IsCommanderAt(ts) == ma.IsCommanderAt(t) })
+				if p, mp := a.Player, ma.Player; p != nil && mp != nil {
+					check("subgroup", p.SubgroupAt(ts) != 0, func(t time.Duration) bool { return p.SubgroupAt(ts) == mp.SubgroupAt(t) })
+					check("profession", p.ProfessionAt(ts) != 0, func(t time.Duration) bool { return p.ProfessionAt(ts) == mp.ProfessionAt(t) })
+					check("elite specialization", p.EliteSpecAt(ts) != 0, func(t time.Duration) bool { return p.EliteSpecAt(ts) == mp.EliteSpecAt(t) })
+				}
+			}
+		}
+	}
+	return c
 }
