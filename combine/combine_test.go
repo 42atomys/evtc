@@ -4,6 +4,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/42atomys/evtc"
 	"github.com/42atomys/evtc/timeline"
@@ -197,6 +198,46 @@ func TestFiles(t *testing.T) {
 	}
 }
 
+// TestGenerated combines the recordings of generated fights, spread over
+// more than a client sees, and checks the combined log against what
+// happened: every strike, every death and every buff stack a client at
+// least was told of is in it once, every creature once per time the
+// clients met it, and the states are those of the recording that speaks.
+func TestGenerated(t *testing.T) {
+	for seed := range uint64(40) {
+		o := genOptions{recorders: 2 + int(seed%3), players: 5, adds: 40, duration: time.Minute, seed: seed}
+		logs, truth := genFight(o)
+		l, tl, m := audited(t, ranked(logs)...)
+		checkInvariants(t, l, tl, m)
+		got := totalsOf(tl)
+		if got.strikes != truth.strikes || got.stacks != truth.stacks || got.deaths != truth.deaths || got.npcs != truth.creatures+truth.apart || got.players != o.players {
+			t.Errorf("seed %d: %d strikes, %d stacks, %d deaths, %d creatures, want %d, %d, %d and %d", seed,
+				got.strikes, got.stacks, got.deaths, got.npcs, truth.strikes, truth.stacks, truth.deaths, truth.creatures+truth.apart)
+		}
+		var held time.Duration
+		for a := range tl.NPCs().Seq() {
+			held += a.Lifetime.Duration()
+		}
+		if want := time.Duration(truth.held) * time.Millisecond; held < want-time.Second || held > want+time.Second {
+			t.Errorf("seed %d: creatures held for %v, want %v", seed, held, want)
+		}
+		if n := toldTwice(l, m, 100*time.Millisecond); n != 0 {
+			t.Errorf("seed %d: %d events told twice", seed, n)
+		}
+		if c := states(tl, m); len(c.notes) != 0 {
+			t.Errorf("seed %d: states differ: %v", seed, c.notes)
+		}
+		// A client alone holds less than the clients together.
+		alone, err := timeline.Build(logs[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if one := totalsOf(alone); one.strikes >= got.strikes || one.npcs >= got.npcs {
+			t.Errorf("seed %d: a client holds %d strikes and %d creatures of %d and %d", seed, one.strikes, one.npcs, got.strikes, got.npcs)
+		}
+	}
+}
+
 // TestLaterBuild checks the logs of an arcdps build later than the
 // package knows: they are combined as the others, and the events of a
 // kind it has no rule for come from the first recording.
@@ -217,5 +258,34 @@ func TestLaterBuild(t *testing.T) {
 	}
 	if n := tl.Hits().On(tl.Boss()).Count(); n != 41 || l.Header.Build != "20301231" {
 		t.Errorf("%d hits on the boss, build %s", n, l.Header.Build)
+	}
+}
+
+// TestOlderFormat checks the logs written before arcdps 20260501, whose
+// casts and buff events are StateCombat events: they are paired as those
+// of the typed format.
+func TestOlderFormat(t *testing.T) {
+	s := newScene(2)
+	a, b := s.recs[0], s.recs[1]
+	s.each(func(r *recorder) {
+		r.ev(1000, evtc.StateAnimationStart, alpha, boss, evtc.Event{SkillID: skillSlam, Value: 500})
+		r.ev(1500, evtc.StateAnimationStop, alpha, 0, evtc.Event{SkillID: skillSlam, Value: 500})
+		r.apply(2000, alpha, charlie, skillMight, 9000, 5)
+		r.remove(3000, charlie, skillMight, 5)
+	})
+	a.ev(3500, evtc.StateAnimationStart, alpha, boss, evtc.Event{SkillID: skillHeat, Value: 300})
+	b.apply(3600, bravo, charlie, skillRegen, 4000, 6)
+	b.ev(4000, evtc.StateBuffRemoveAll, charlie, 0, evtc.Event{SkillID: skillRegen, IsBuffRemove: evtc.BuffRemoveAll})
+	logs := s.logs(5000)
+	typed, tl, _ := audited(t, logs...)
+	l, old, m := audited(t, older(logs[0]), older(logs[1]))
+	if m.recs[0].typed || m.recs[1].typed || l.Header.Build != "20250913" {
+		t.Fatalf("typed = %v and %v, build %s", m.recs[0].typed, m.recs[1].typed, l.Header.Build)
+	}
+	if len(l.Events) != len(typed.Events) || count(l, evtc.StateCombat) != count(typed, evtc.StateCombat)+7 {
+		t.Errorf("%d events, %d of them combat events; %d in the typed format", len(l.Events), count(l, evtc.StateCombat), len(typed.Events))
+	}
+	if a, b := totalsOf(old), totalsOf(tl); a != b || a.casts != 2 || a.stacks != 2 {
+		t.Errorf("totals = %+v, in the typed format %+v", a, b)
 	}
 }
