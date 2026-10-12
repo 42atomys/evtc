@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/42atomys/evtc"
 	"github.com/42atomys/evtc/timeline"
@@ -266,6 +267,118 @@ func sameLog(a, b *evtc.Log) bool {
 // clone returns a copy of a log that shares nothing with it.
 func clone(l *evtc.Log) *evtc.Log {
 	return &evtc.Log{Header: l.Header, Agents: slices.Clone(l.Agents), Skills: slices.Clone(l.Skills), Events: slices.Clone(l.Events)}
+}
+
+// cut returns what a client that stopped recording at the instant given
+// would hold of a log: the events until then, the agents it met, and what
+// arcdps writes when a log ends, the end of the squad combat and a leave
+// for every agent still held.
+func cut(tl *timeline.Timeline, at time.Duration) *evtc.Log {
+	out := &evtc.Log{Header: tl.Log.Header, Skills: tl.Log.Skills}
+	typed := tl.Has(evtc.CapabilityTypedEvents)
+	var last uint64
+	// The last leave the log writes for an address after the cut.
+	leaves := map[uint64]*evtc.Event{}
+	for i := range tl.Log.Events {
+		e := tl.Log.Events[i]
+		if !timed(e.IsStateChange) {
+			out.Events = append(out.Events, e)
+			continue
+		}
+		t := tl.TimeOf(&e)
+		if t > at {
+			if _, ok := leaves[e.SrcAgent]; !ok && e.IsStateChange == evtc.StateTeamChange && e.DstAgent == 0 {
+				leaves[e.SrcAgent] = &tl.Log.Events[i]
+			}
+			continue
+		}
+		last = max(last, e.Time)
+		out.Events = append(out.Events, e)
+	}
+	// The agents held at the cut, and those the client met.
+	held, met := map[uint64]bool{}, map[uint64]bool{}
+	for i := range out.Events {
+		e := &out.Events[i]
+		if !timed(e.IsStateChange) {
+			continue
+		}
+		k := kindOf(e, typed)
+		r := ruleOf(e, k, typed)
+		if r.src {
+			held[e.SrcAgent], met[e.SrcAgent] = !isLeave(e, k), true
+		}
+		if r.dst {
+			held[e.DstAgent], met[e.DstAgent] = true, true
+		}
+	}
+	var left []uint64
+	for addr := range leaves {
+		if held[addr] {
+			left = append(left, addr)
+		}
+	}
+	slices.Sort(left)
+	for _, addr := range left {
+		l := *leaves[addr]
+		l.Time = last
+		out.Events = append(out.Events, l)
+	}
+	for _, a := range tl.Log.Agents {
+		if met[a.Addr] || a.IsElite != 0xFFFFFFFF {
+			out.Agents = append(out.Agents, a)
+		}
+	}
+	for i := range tl.Log.Events {
+		if e := tl.Log.Events[i]; e.IsStateChange == evtc.StateSquadCombatEnd && tl.TimeOf(&e) > at {
+			e.Time = last
+			out.Events = append(out.Events, e)
+			break
+		}
+	}
+	return out
+}
+
+// lost tells the events of a log that are in no combined log when the
+// recording read first stopped at the instant given: what a client writes
+// once about its own recording comes from the first one.
+func lost(tl *timeline.Timeline, at time.Duration) func(*evtc.Event) bool {
+	typed := tl.Has(evtc.CapabilityTypedEvents)
+	return func(e *evtc.Event) bool {
+		return timed(e.IsStateChange) && ruleOf(e, kindOf(e, typed), typed).class == classRecording && tl.TimeOf(e) > at
+	}
+}
+
+// moved returns a log as another client would write it: under other
+// addresses and on another clock.
+func moved(tl *timeline.Timeline, mask, shift uint64) *evtc.Log {
+	typed := tl.Has(evtc.CapabilityTypedEvents)
+	out := &evtc.Log{Header: tl.Log.Header, Skills: tl.Log.Skills}
+	addr := func(a uint64) uint64 {
+		if a == 0 {
+			return 0
+		}
+		return a ^ mask
+	}
+	for _, a := range tl.Log.Agents {
+		a.Addr = addr(a.Addr)
+		out.Agents = append(out.Agents, a)
+	}
+	for i := range tl.Log.Events {
+		e := tl.Log.Events[i]
+		k := kindOf(&e, typed)
+		r := ruleOf(&e, k, typed)
+		if timed(e.IsStateChange) {
+			e.Time += shift
+		}
+		if r.src || k == evtc.StateIIDChange {
+			e.SrcAgent = addr(e.SrcAgent)
+		}
+		if r.dst || k == evtc.StateIIDChange {
+			e.DstAgent = addr(e.DstAgent)
+		}
+		out.Events = append(out.Events, e)
+	}
+	return out
 }
 
 // totals are the counted nodes of a timeline.
