@@ -159,3 +159,98 @@ func TestSampleHeals(t *testing.T) {
 		}
 	}
 }
+
+// TestRecordings combines the recordings of recordingsPath: all together,
+// in any order, and two by two.
+func TestRecordings(t *testing.T) {
+	logs := loadRecordings(t)
+	all, err := Logs(logs...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back := slices.Clone(logs)
+	slices.Reverse(back)
+	if again, err := Logs(back...); err != nil || !sameLog(all, again) {
+		t.Errorf("the order given matters: %v", err)
+	}
+	tl, err := timeline.Build(all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := totalsOf(tl)
+	want := totals{
+		players: 5, npcs: 549, gadgets: 275, strikes: 3289, strikeDamage: 8442761, casts: 1696, stacks: 14270,
+		effects: 8808, missiles: 912, deaths: 247, markers: 4, groundMarkers: 1,
+	}
+	got.events, got.ticks, got.positions, got.rewards = 0, 0, 0, 0
+	if got != want {
+		t.Errorf("totals = %+v, want %+v", got, want)
+	}
+	if boss := tl.Boss(); boss == nil || tl.Hits().On(boss).Strikes().Count() != 1331 {
+		t.Errorf("boss = %v", boss)
+	}
+	// Three of the four clients ran the healing stats addon. A heal two
+	// of them wrote is one heal, whatever the log that holds each record.
+	if got, want := healsOf(tl), (heals{heals: 1106, twice: 101, healed: 236375, barrier: 771436}); got != want {
+		t.Errorf("heals = %+v, want %+v", got, want)
+	}
+
+	outOfOrder := 0
+	for i := range logs {
+		for j := range logs {
+			if i == j {
+				continue
+			}
+			l, tl, m := audited(t, logs[i], logs[j])
+			checkInvariants(t, l, tl, m)
+			outOfOrder += inversions(m)
+			if n := toldTwice(l, m, 100*time.Millisecond); n > 2 {
+				t.Errorf("recordings %d and %d: %d events told twice", i, j, n)
+			}
+			c := states(tl, m)
+			if compared, differ := c.total(); differ > 2 || compared < 1_500_000 {
+				t.Errorf("recordings %d and %d: %d states of %d differ: %v", i, j, differ, compared, c.notes)
+			}
+			for _, single := range []*evtc.Log{logs[i], logs[j]} {
+				one, err := timeline.Build(single)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if a, b := totalsOf(one), totalsOf(tl); b.strikes < a.strikes || named(tl) < named(one) || b.effects < a.effects || b.missiles < a.missiles || b.players != a.players {
+					t.Errorf("recordings %d and %d hold less than one of them: %+v and %+v", i, j, b, a)
+				}
+			}
+		}
+	}
+	// The pairs of messages of the server the two recordings tell in
+	// another order: two messages within 20 ms of each other for most, a
+	// pairing that moves changes the count.
+	if outOfOrder != 198 {
+		t.Errorf("%d pairs of messages of the server out of order, want 198", outOfOrder)
+	}
+}
+
+// TestRecordingsByTicks checks the clock set by the ticks of the server on
+// real recordings: the first Deimos recording with another one whose
+// strikes are dropped, as if its recorder had stood too far to see them,
+// gets the offset the strikes give within the jitter of a client.
+func TestRecordingsByTicks(t *testing.T) {
+	logs := loadRecordings(t)
+	for i := 1; i < len(logs); i++ {
+		byStrikes := mustRecord(t, logs[0], logs[i])
+		far := *logs[i]
+		far.Events = nil
+		for _, e := range logs[i].Events {
+			if e.IsStateChange != evtc.StateCombat || e.Buff != 0 {
+				far.Events = append(far.Events, e)
+			}
+		}
+		byTicks := mustRecord(t, logs[0], &far)
+		if d := (byTicks[1].off - byStrikes[1].off).Abs(); d > 20*time.Millisecond {
+			t.Errorf("recording %d: offset %v by the ticks, %v by the strikes", i, byTicks[1].off, byStrikes[1].off)
+		}
+		if _, n := offsetOf(strikes(byTicks[0]), strikes(byTicks[1])); n != 0 {
+			t.Errorf("recording %d still shares %d strikes", i, n)
+		}
+	}
+}
