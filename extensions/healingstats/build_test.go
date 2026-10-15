@@ -1,6 +1,7 @@
 package healingstats
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -66,7 +67,7 @@ func TestMergePeers(t *testing.T) {
 	// still the one kept.
 	b.heal(2990, addrBravo, addrAlpha, skillHeal, 250, fromSrc)
 	b.heal(3000, addrBravo, addrAlpha, skillHeal, 250, fromDst)
-	// Beyond the window, two heals.
+	// The shared copy comes late.
 	b.heal(4000, addrBravo, addrAlpha, skillHeal, 260, fromDst)
 	b.heal(4600, addrBravo, addrAlpha, skillHeal, 260, fromSrc)
 	// The same side twice is two heals.
@@ -79,7 +80,8 @@ func TestMergePeers(t *testing.T) {
 	for range 3 {
 		b.tick(6100, addrAlpha, addrBravo, skillRegen, 100, fromDst)
 	}
-	// Different amounts never match.
+	// Different amounts never match. The client of Bravo writes the heals
+	// Bravo deals: what Alpha alone tells of them is left out.
 	b.heal(7000, addrBravo, addrAlpha, skillHeal, 280, fromDst)
 	b.heal(7010, addrBravo, addrAlpha, skillHeal, 281, fromSrc)
 	// A record carrying both flags never merges.
@@ -92,8 +94,11 @@ func TestMergePeers(t *testing.T) {
 	s := mustBuild(t, b.build(10000))
 
 	heals := s.Heals().All()
-	if s.Merged != 7 || len(heals) != 15 || s.Extension.Events().Count() != 22 {
-		t.Fatalf("merged %d, heals %d, events %d", s.Merged, len(heals), s.Extension.Events().Count())
+	if s.Merged != 8 || len(heals) != 12 || len(s.LeftOut) != 2 || s.Extension.Events().Count() != 22 {
+		t.Fatalf("merged %d, heals %d, left out %d, events %d", s.Merged, len(heals), len(s.LeftOut), s.Extension.Events().Count())
+	}
+	if at := []time.Duration{s.Timeline.TimeOf(s.LeftOut[0]), s.Timeline.TimeOf(s.LeftOut[1])}; at[0] != 7*time.Second || at[1] != 8010*time.Millisecond {
+		t.Errorf("left out at %v", at)
 	}
 	at := func(h *Heal) []time.Duration {
 		out := []time.Duration{h.Time, -1}
@@ -109,17 +114,14 @@ func TestMergePeers(t *testing.T) {
 		{1000 * time.Millisecond, 1120 * time.Millisecond, fromDst},
 		{2000 * time.Millisecond, 2050 * time.Millisecond, fromSrc},
 		{3000 * time.Millisecond, 2990 * time.Millisecond, fromDst},
-		{4000 * time.Millisecond, -1, fromDst},
-		{4600 * time.Millisecond, -1, fromSrc},
+		{4000 * time.Millisecond, 4600 * time.Millisecond, fromDst},
 		{5000 * time.Millisecond, -1, fromSrc},
 		{5010 * time.Millisecond, -1, fromSrc},
 		{6000 * time.Millisecond, 6100 * time.Millisecond, fromSrc},
 		{6000 * time.Millisecond, 6100 * time.Millisecond, fromSrc},
 		{6000 * time.Millisecond, 6100 * time.Millisecond, fromSrc},
-		{7000 * time.Millisecond, -1, fromDst},
 		{7010 * time.Millisecond, -1, fromSrc},
 		{8000 * time.Millisecond, -1, both},
-		{8010 * time.Millisecond, -1, fromDst},
 		{9000 * time.Millisecond, 9100 * time.Millisecond, fromSrc},
 	} {
 		h := heals[i]
@@ -132,8 +134,172 @@ func TestMergePeers(t *testing.T) {
 		}
 	}
 	alpha, bravo := player(t, s, addrAlpha), player(t, s, addrBravo)
-	if alpha.HealsTaken().Count() != 6 || alpha.HealsTaken().Healed() != 300+250+260+260+280+281 || bravo.HealsTaken().Count() != 8 || bravo.HealsTaken().Self().Count() != 2 {
+	if alpha.HealsTaken().Count() != 4 || alpha.HealsTaken().Healed() != 300+250+260+281 || bravo.HealsTaken().Count() != 7 || bravo.HealsTaken().Self().Count() != 1 {
 		t.Errorf("alpha took %d heals for %d, bravo %d", alpha.HealsTaken().Count(), alpha.HealsTaken().Healed(), bravo.HealsTaken().Count())
+	}
+	checkInvariants(t, s)
+}
+
+// TestMergeLate checks the copies that come late: the closest records
+// pair first, within a minute.
+func TestMergeLate(t *testing.T) {
+	b := fixture()
+	b.register(0, "2.19rc2", 2)
+	// The copy of the first tick never came, the one of the second did at
+	// once: it is not the copy of the first.
+	b.tick(1000, addrAlpha, addrBravo, skillRegen, 130, fromSrc)
+	b.tick(3000, addrAlpha, addrBravo, skillRegen, 130, fromSrc)
+	b.tick(3100, addrAlpha, addrBravo, skillRegen, 130, fromDst)
+	// Copies that come 3, 15 and 45 seconds late.
+	b.heal(10000, addrAlpha, addrBravo, skillHeal, 301, fromSrc)
+	b.heal(11000, addrAlpha, addrBravo, skillHeal, 302, fromSrc)
+	b.heal(12000, addrAlpha, addrBravo, skillHeal, 303, fromSrc)
+	b.heal(13000, addrAlpha, addrBravo, skillHeal, 301, fromDst)
+	b.heal(26000, addrAlpha, addrBravo, skillHeal, 302, fromDst)
+	b.heal(57000, addrAlpha, addrBravo, skillHeal, 303, fromDst)
+	// Over a minute apart, the records tell two heals. The client of Bravo
+	// writes the heals Bravo deals, so that the one Alpha tells alone is
+	// left out.
+	b.heal(60000, addrBravo, addrAlpha, skillHeal, 304, fromDst)
+	b.heal(120001, addrBravo, addrAlpha, skillHeal, 304, fromSrc)
+	// Two heals of one content, the copies of both late: each record takes
+	// the closest one.
+	b.heal(130000, addrBravo, addrCharlie, skillHeal, 305, fromSrc)
+	b.heal(134000, addrBravo, addrCharlie, skillHeal, 305, fromSrc)
+	b.heal(134400, addrBravo, addrCharlie, skillHeal, 305, fromDst)
+	b.heal(136000, addrBravo, addrCharlie, skillHeal, 305, fromDst)
+	s := mustBuild(t, b.build(140000))
+	tl := s.Timeline
+
+	type pair struct{ event, peer time.Duration }
+	var got []pair
+	for h := range s.Heals().Seq() {
+		p := pair{h.Time, -1}
+		if h.PeerEvent != nil {
+			p.peer = tl.TimeOf(h.PeerEvent)
+		}
+		got = append(got, p)
+	}
+	want := []pair{
+		{1 * time.Second, -1},
+		{3 * time.Second, 3100 * time.Millisecond},
+		{10 * time.Second, 13 * time.Second},
+		{11 * time.Second, 26 * time.Second},
+		{12 * time.Second, 57 * time.Second},
+		{120001 * time.Millisecond, -1},
+		{130 * time.Second, 136 * time.Second},
+		{134 * time.Second, 134400 * time.Millisecond},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("heals = %v, want %v", got, want)
+	}
+	if s.Merged != 6 || len(s.LeftOut) != 1 || tl.TimeOf(s.LeftOut[0]) != time.Minute {
+		t.Errorf("merged %d, left out %v", s.Merged, s.LeftOut)
+	}
+	checkInvariants(t, s)
+}
+
+// TestLeftOut checks the records of the client of a destination: they
+// stand for a heal when the client of the source writes nothing.
+func TestLeftOut(t *testing.T) {
+	b := fixture()
+	b.register(0, "2.19rc2", 2)
+	// Charlie runs no addon and nobody knows the source of the second
+	// heal: what Alpha tells is all the log holds of them.
+	b.heal(1000, addrCharlie, addrAlpha, skillHeal, 100, fromDst)
+	b.heal(2000, 0, addrAlpha, skillHeal, 110, fromDst)
+	b.heal(2500, 0, addrAlpha, skillHeal, 115, both)
+	// Bravo shares its stats: its client tells the heals Bravo deals.
+	b.heal(3000, addrBravo, addrCharlie, skillHeal, 120, fromSrc)
+	b.heal(4000, addrBravo, addrAlpha, skillHeal, 130, fromDst)
+	// The pet of Alpha heals Bravo and the client of Bravo alone tells it,
+	// though the client of Alpha writes what the pet deals.
+	b.minionHeal(5000, addrPet, instAlpha, addrCharlie, skillHeal, 140, fromSrc)
+	b.minionHeal(6000, addrPet, instAlpha, addrBravo, skillHeal, 150, fromDst)
+	s := mustBuild(t, b.build(10000))
+	alpha, bravo, charlie, pet := player(t, s, addrAlpha), player(t, s, addrBravo), player(t, s, addrCharlie), player(t, s, addrPet)
+
+	if got := amounts(s.Heals()); !slices.Equal(got, []int32{100, 110, 115, 120, 140}) {
+		t.Errorf("heals = %v", got)
+	}
+	var left []int32
+	for _, e := range s.LeftOut {
+		left = append(left, -e.Value)
+	}
+	if !slices.Equal(left, []int32{130, 150}) || s.Merged != 0 {
+		t.Errorf("left out = %v, merged %d", left, s.Merged)
+	}
+	if !alpha.writes || !bravo.writes || charlie.writes || !pet.writes || s.Unknown.writes {
+		t.Errorf("writes: alpha %v bravo %v charlie %v pet %v unknown %v", alpha.writes, bravo.writes, charlie.writes, pet.writes, s.Unknown.writes)
+	}
+	// A record left out still tells who runs the addon.
+	if !alpha.Recorded || !bravo.Recorded || charlie.Recorded || len(s.Recorded) != 2 {
+		t.Errorf("recorded = %v", s.Recorded)
+	}
+	checkInvariants(t, s)
+
+	// The record of a destination tells that its client runs the addon
+	// when it is all that client wrote.
+	b = fixture()
+	b.register(0, "2.19rc2", 2)
+	b.heal(1000, addrAlpha, addrCharlie, skillHeal, 100, fromSrc)
+	b.heal(2000, addrAlpha, addrBravo, skillHeal, 200, fromDst)
+	s = mustBuild(t, b.build(10000))
+	if s.Heals().Count() != 1 || len(s.LeftOut) != 1 || len(s.Recorded) != 2 || !player(t, s, addrBravo).Recorded {
+		t.Errorf("heals %d, left out %d, recorded %v", s.Heals().Count(), len(s.LeftOut), s.Recorded)
+	}
+	checkInvariants(t, s)
+
+	// A record that names a master nobody carries the instance id of is
+	// the one of the client of its source.
+	b = fixture()
+	b.register(0, "2.19rc2", 2)
+	b.add(signed(evtc.Event{Time: b.at(1000), SrcAgent: addrBravo, SrcMasterInstanceID: 999, DstAgent: addrCharlie, SkillID: skillHeal, Value: -100, IsOffcycle: fromSrc, IsStateChange: evtc.StateExtensionCombat}))
+	b.heal(2000, addrBravo, addrAlpha, skillHeal, 200, fromDst)
+	s = mustBuild(t, b.build(10000))
+	if s.Heals().Count() != 1 || len(s.LeftOut) != 1 || len(s.Recorded) != 2 || !player(t, s, addrBravo).writes {
+		t.Errorf("heals %d, left out %d, recorded %v", s.Heals().Count(), len(s.LeftOut), s.Recorded)
+	}
+	checkInvariants(t, s)
+}
+
+// TestLeftOutByMaster checks whose client wrote the heals of a minion:
+// the one of the master the record names, whatever the master of the
+// agent the addon gives the address of.
+func TestLeftOutByMaster(t *testing.T) {
+	const addrCrow, instCrow = 0x2004, 24
+	b := fixture()
+	b.register(0, "2.19rc2", 2)
+	// A minion of Charlie, who runs no addon, lives two seconds.
+	b.npc(addrCrow, instCrow, 1083, "Crow")
+	b.add(evtc.Event{Time: b.at(1000), SrcAgent: addrCrow, SrcMasterInstanceID: instCharlie, IsStateChange: evtc.StateEnterCombat})
+	b.state(3000, addrCrow, evtc.StateChangeDead)
+	// A minion of Bravo takes its instance id, then a squad member out of
+	// the view of Alpha: the addon names both by the address of the crow.
+	b.add(signed(evtc.Event{Time: b.at(4000), SrcAgent: addrCrow, SrcMasterInstanceID: instBravo, DstAgent: addrAlpha, SkillID: skillHeal, Value: -100, IsOffcycle: fromSrc, IsStateChange: evtc.StateExtensionCombat}))
+	b.heal(6000, addrCrow, addrCrow, skillHeal, 200, both)
+	// What Alpha tells of the heals of Charlie is all the log holds of
+	// them.
+	b.heal(7000, addrCharlie, addrAlpha, skillHeal, 300, fromDst)
+	// Bravo is known to write by its minion alone.
+	b.heal(8000, addrBravo, addrAlpha, skillHeal, 400, fromDst)
+	s := mustBuild(t, b.build(10000))
+	bravo, charlie, crow := player(t, s, addrBravo), player(t, s, addrCharlie), player(t, s, addrCrow)
+
+	if crow.Master != charlie.Agent {
+		t.Fatalf("crow master = %v", crow.Master)
+	}
+	if got := amounts(s.Heals()); !slices.Equal(got, []int32{100, 200, 300}) {
+		t.Errorf("heals = %v", got)
+	}
+	if len(s.LeftOut) != 1 || s.LeftOut[0].Value != -400 {
+		t.Errorf("left out = %v", s.LeftOut)
+	}
+	if !bravo.writes || charlie.writes || !crow.writes {
+		t.Errorf("writes: bravo %v charlie %v crow %v", bravo.writes, charlie.writes, crow.writes)
+	}
+	if !bravo.Recorded || charlie.Recorded || !crow.Recorded || len(s.Recorded) != 2 {
+		t.Errorf("recorded: bravo %v charlie %v crow %v, %v", bravo.Recorded, charlie.Recorded, crow.Recorded, s.Recorded)
 	}
 	checkInvariants(t, s)
 }

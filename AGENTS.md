@@ -21,6 +21,7 @@ library. `cmd/` holds two commands.
 | `cmd/evtccombine/`         | Tiny command writing the log that combines the recordings given.                                                                                                                                                                                       |
 | `examples/sabetha/`        | A full raid report written with the public API only. Run it after API changes: `go run ./examples/sabetha`.                                                                                                                                            |
 | `tests_fixtures/`          | Sample logs (`*.zevtc`), used by integration tests when present. Not part of the API.                                                                                                                                                                  |
+| `docs/`                    | `format-history.md`: how the log format changed since 2016, with the dates behind `capabilityTable` and `defects`.                                                                                                                                     |
 
 Read `timeline/README.md` first: model table, conventions, cookbook and the
 table "What is read from the log" that maps every arcdps state change to
@@ -241,9 +242,19 @@ go test ./combine -bench . -benchmem                  # reference: ~800 ns and 1
   signature.
 - Healing stats addon: the field layout is the table "What is read from
   the log" of `extensions/healingstats/README.md`. A heal between two
-  clients running the addon is written twice and the decoder pairs the
-  records within `PeerWindow`; identical heals in the same millisecond
-  from one client are real (one per boon granted, for example).
+  clients running the addon is written twice. It counts once, by the
+  record of the client of its source, as in the windows of the addon; the
+  decoder pairs the two records within `PeerWindow`, the closest first,
+  to date it. Identical heals in the same millisecond from one client
+  are real (one per boon granted, for example). The addon sends its
+  records from a client to the others one at a time, from a queue that
+  drops what overflows: of 46,863 copies, 45,512 are written within
+  500 ms, 89 between 20 s and a minute later, and some never.
+- The client that wrote a record of the healing stats addon is the one
+  of the master the record names, not of the master the timeline gives
+  the agent of its address, which may be another agent (see the list of
+  agents of an extension below). With the master of the timeline, 983
+  heals of players who do not run the addon were taken for copies.
 - arcdps records the agents within 5,000 units of the player on each
   axis. Two recordings of one fight do not hold the same agents, nor the
   same events.

@@ -18,7 +18,7 @@ go get github.com/42atomys/evtc@latest
 | `github.com/42atomys/evtc/timeline` | Builds a temporal graph over a decoded log and lets you query it by time: positions, health, casts, hits, buffs, downs, breakbars. See [timeline/README.md](timeline/README.md). |
 | `github.com/42atomys/evtc/extensions/healingstats` | Decodes the events of the healing stats addon into heals and barrier linked to the timeline; importing it is enough. See [extensions/healingstats/README.md](extensions/healingstats/README.md). |
 | `github.com/42atomys/evtc/combine` | Merges the recordings several players made of one fight into one log, with every agent and every event once. See [combine/README.md](combine/README.md). |
-| `cmd/evtcparser` | Prints the header and table sizes of a log: `go run ./cmd/evtcparser fight.zevtc`. |
+| `cmd/evtcparser` | Prints the header and table sizes of a log, what it cannot carry and what is known to be wrong with it: `go run ./cmd/evtcparser fight.zevtc`. |
 | `cmd/evtccombine` | Writes the log that combines the recordings given: `go run ./cmd/evtccombine -o fight.zevtc mine.zevtc theirs.zevtc`. |
 | `examples/sabetha` | A full report of a Sabetha raid log written with the timeline API: `go run ./examples/sabetha fight.zevtc`. |
 

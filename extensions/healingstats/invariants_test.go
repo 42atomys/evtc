@@ -11,8 +11,8 @@ import (
 
 // checkInvariants verifies the structural properties every Stats must
 // satisfy: exact sizing, symmetric edges, sorted lists, consistent fields
-// and one heal behind every event of the addon. It runs on synthetic logs,
-// on the real logs and in the fuzzer.
+// and every event of the addon behind one heal or left out. It runs on
+// synthetic logs, on the real logs and in the fuzzer.
 func checkInvariants(tb testing.TB, s *Stats) {
 	tb.Helper()
 	fail := func(format string, args ...any) {
@@ -101,7 +101,7 @@ func checkInvariants(tb testing.TB, s *Stats) {
 		if cr := h.Credited(); cr == nil || (cr != h.Src && cr.Agent != h.Src.Master && cr != h.Src.master) || !h.creditedTo(who{one: cr.Agent}) {
 			fail("heal %d is credited to %v", i, cr)
 		}
-		if h.SrcRecorded && h.Src != s.Unknown && !(h.Src.Recorded && h.Credited().Recorded) {
+		if h.SrcRecorded && h.Src != s.Unknown && !h.Src.Recorded {
 			fail("heal %d was written by an unrecorded source %v", i, h.Src)
 		}
 		if h.DstRecorded && h.Dst != s.Unknown && !h.Dst.Recorded {
@@ -111,14 +111,101 @@ func checkInvariants(tb testing.TB, s *Stats) {
 	if merged != s.Merged {
 		fail("Merged = %d, %d heals have a peer record", s.Merged, merged)
 	}
-	// Every event of the addon is behind exactly one heal.
+
+	// A heal counts by the record of the client of its source: the record
+	// of the client of the destination stands for a heal when the client
+	// of the source writes nothing, and is left out otherwise.
+	writes, recorded := map[*Agent]bool{}, map[*Agent]bool{}
+	if tl.POV != nil {
+		recorded[s.Agent(tl.POV)] = true
+	}
+	told := func(e *evtc.Event, src, dst *Agent) {
+		if e.IsOffcycle&fromSrc != 0 {
+			for _, a := range []*Agent{src, s.teller(src, e.SrcMasterInstanceID, e)} {
+				if a != s.Unknown {
+					writes[a], recorded[a] = true, true
+				}
+			}
+		}
+		if e.IsOffcycle&fromDst != 0 {
+			for _, a := range []*Agent{dst, s.teller(dst, e.DstMasterInstanceID, e)} {
+				if a != s.Unknown {
+					recorded[a] = true
+				}
+			}
+		}
+	}
+	for _, h := range s.heals {
+		told(h.Event, h.Src, h.Dst)
+		if h.PeerEvent != nil {
+			told(h.PeerEvent, h.Src, h.Dst)
+		}
+	}
+	for _, e := range s.LeftOut {
+		src, dst := s.parties(e)
+		told(e, s.node(src), s.node(dst))
+	}
+	for _, a := range s.nodes() {
+		if a.writes != writes[a] {
+			fail("%v: writes %v, a client wrote heals it dealt %v", a, a.writes, writes[a])
+		}
+		if a.Recorded != recorded[a] {
+			fail("%v: recorded %v, a client wrote records of it %v", a, a.Recorded, recorded[a])
+		}
+	}
+	written := func(e *evtc.Event, src *Agent) bool {
+		return writes[src] || writes[s.teller(src, e.SrcMasterInstanceID, e)]
+	}
+	for i, h := range s.heals {
+		if !h.SrcRecorded && h.DstRecorded && written(h.Event, h.Src) {
+			fail("heal %d is told by the client of its destination alone and the client of %v writes", i, h.Src)
+		}
+	}
+	exact("records left out", len(s.LeftOut), cap(s.LeftOut))
+	for i, e := range s.LeftOut {
+		seen[e]++
+		if i > 0 && e.Time < s.LeftOut[i-1].Time {
+			fail("records left out are not sorted at %d", i)
+		}
+		src, _ := s.parties(e)
+		if e.IsStateChange != evtc.StateExtensionCombat || tl.ExtensionOf(e) != x || e.IsOffcycle&both != fromDst || !written(e, s.node(src)) {
+			fail("record %d is left out: %+v", i, e)
+		}
+	}
+	// Every event of the addon is behind exactly one heal, or left out.
 	for ev := range x.Events().Seq() {
 		if seen[ev] != 1 {
 			fail("event at %v is behind %d heals", tl.TimeOf(ev), seen[ev])
 		}
 	}
-	if total := x.Events().Count(); total != len(s.heals)+s.Merged {
-		fail("%d events for %d heals and %d merges", total, len(s.heals), s.Merged)
+	if total := x.Events().Count(); total != len(s.heals)+s.Merged+len(s.LeftOut) {
+		fail("%d events for %d heals, %d merges and %d records left out", total, len(s.heals), s.Merged, len(s.LeftOut))
+	}
+	// No record stays alone within PeerWindow of the record the other
+	// client wrote of the same game event.
+	alone := map[peerKey][]*evtc.Event{}
+	lone := func(e *evtc.Event) {
+		if side := e.IsOffcycle & both; side == fromSrc || side == fromDst {
+			k := peerKey{e.SrcInstanceID, e.DstInstanceID, e.SkillID, e.Value, e.BuffDamage, e.Buff, e.IsShields}
+			alone[k] = append(alone[k], e)
+		}
+	}
+	for _, h := range s.heals {
+		if h.PeerEvent == nil {
+			lone(h.Event)
+		}
+	}
+	for _, e := range s.LeftOut {
+		lone(e)
+	}
+	for _, list := range alone {
+		for i, a := range list {
+			for _, b := range list[i+1:] {
+				if a.IsOffcycle&both != b.IsOffcycle&both && max(a.Time, b.Time)-min(a.Time, b.Time) <= window {
+					fail("the records at %v and %v tell one heal and stay alone", tl.TimeOf(a), tl.TimeOf(b))
+				}
+			}
+		}
 	}
 
 	dealt, taken := 0, 0
@@ -215,11 +302,19 @@ func names(tl *timeline.Timeline, a *timeline.Agent, addr uint64, inst uint16, t
 }
 
 func TestInvariantsSynthetic(t *testing.T) {
+	late, left := 0, 0
 	for seed := uint64(1); seed <= 8; seed++ {
 		s := mustBuild(t, genLog(seed, 60))
 		if s.Merged == 0 || s.Heals().Count() == 0 || len(s.Recorded) != 2 {
 			t.Errorf("seed %d: %d heals, %d merged, %d recorded", seed, s.Heals().Count(), s.Merged, len(s.Recorded))
 		}
 		checkInvariants(t, s)
+		late += s.Heals().Where(func(h *Heal) bool {
+			return h.PeerEvent != nil && s.Timeline.TimeOf(h.PeerEvent)-h.Time > windows[0]
+		}).Count()
+		left += len(s.LeftOut)
+	}
+	if late == 0 || left == 0 {
+		t.Errorf("%d copies came late, %d records are left out", late, left)
 	}
 }

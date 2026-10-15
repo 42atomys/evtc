@@ -8,9 +8,10 @@ import (
 
 // genLog generates a deterministic synthetic log with the events of the
 // addon: Alpha records it, Bravo shares its stats, so the heals between
-// them are written twice, Charlie does not, and the pet of Alpha heals as
-// well, as does a mech of Bravo the recording client does not track. Alpha
-// casts its healing skill every two seconds.
+// them are written twice unless the copy of Bravo is lost, Charlie does
+// not, and the pet of Alpha heals as well, as does a mech of Bravo the
+// recording client does not track. Alpha casts its healing skill every two
+// seconds.
 func genLog(seed uint64, seconds int) *evtc.Log {
 	r := rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))
 	b := fixture()
@@ -58,11 +59,22 @@ func genLog(seed uint64, seconds int) *evtc.Log {
 				b.heal(t, src, dst, skillHeal, amount, flags)
 			}
 		}
-		// A heal between the two recording clients is written by both, the
-		// copy of the squad member a little later.
+		// A heal between the two recording clients is written by both: the
+		// record of Alpha at once, the copy Bravo shares a little later for
+		// most, after seconds for some, never for a few.
 		if flags&both == both && src != dst && (src == addrBravo || dst == addrBravo) {
-			write(t, flags&^fromDst)
-			write(t+uint64(20+r.IntN(200)), flags&^fromSrc)
+			mine, shared := flags&^fromDst, flags&^fromSrc
+			if src == addrBravo {
+				mine, shared = shared, mine
+			}
+			write(t, mine)
+			switch fate := r.IntN(20); {
+			case fate == 0:
+			case fate < 4:
+				write(min(t+uint64(500+r.IntN(40000)), end-1), shared)
+			default:
+				write(t+uint64(20+r.IntN(200)), shared)
+			}
 			continue
 		}
 		write(t, flags)

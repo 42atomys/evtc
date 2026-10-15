@@ -3,6 +3,7 @@ package healingstats_test
 import (
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/42atomys/evtc"
@@ -176,6 +177,35 @@ func ExampleHeal_PeerEvent() {
 	// Alpha -> Bravo Shelter 900 at 1.2s
 	// written by the client of the source: true | of the destination: true | second record at 1.26s
 	// Charlie runs no addon: true false true
+}
+
+func ExampleStats_leftOut() {
+	l := cookbookLog()
+	// The copy Bravo shares of the heal it received comes two seconds late
+	// and its record of the second tick never does.
+	for i := range l.Events {
+		if l.Events[i].Time == epoch+1260 {
+			l.Events[i].Time = epoch + 3260
+		}
+	}
+	l.Events = slices.DeleteFunc(l.Events, func(e evtc.Event) bool { return e.Time == epoch+3050 })
+	tl, err := timeline.Build(l)
+	if err != nil {
+		panic(err)
+	}
+	h := healingstats.Of(tl)
+	fmt.Println(h.Heals().Count(), "heals,", h.Merged, "written by both clients,", len(h.LeftOut), "record left out")
+	late := h.Heals().On(tl.PlayerByName("Bravo")).First()
+	fmt.Println(late.Skill.Name, "at", late.Time, "| copy of Bravo written at", tl.TimeOf(late.PeerEvent))
+	// The client of Bravo writes the heals Bravo deals: the tick Alpha
+	// tells alone is no heal.
+	for _, e := range h.LeftOut {
+		fmt.Println("left out:", tl.Skill(e.SkillID).Name, "at", tl.TimeOf(e), "| ticks of Bravo:", h.Heals().By(tl.PlayerByName("Bravo")).Ticks().Count())
+	}
+	// Output:
+	// 6 heals, 2 written by both clients, 1 record left out
+	// Shelter at 1.2s | copy of Bravo written at 3.26s
+	// left out: Regeneration at 3s | ticks of Bravo: 1
 }
 
 func ExampleHeals_OfCast() {
