@@ -6,16 +6,19 @@ code; the README files are the user-facing documentation.
 ## What this is
 
 Everything around the arcdps EVTC combat logs of Guild Wars 2: the file
-decoder at the root, the timeline SDK and one package per arcdps
-extension. Module `github.com/42atomys/evtc`, Go 1.27, no dependencies
-outside the standard library. `cmd/` holds one small command.
+decoder at the root, the timeline SDK, one package per arcdps extension
+and the package that combines several recordings of one fight. Module
+`github.com/42atomys/evtc`, Go 1.27, no dependencies outside the standard
+library. `cmd/` holds two commands.
 
 | Path                       | Role                                                                                                                                                                                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `.` (package `evtc`)       | Raw decoder: `.evtc`/`.zevtc` file to header, agent table, skill table and events, and the writer that puts a log back in a file (`write.go`). No interpretation beyond `Has` and `Warnings`.                                                          |
 | `timeline/`                | Temporal graph over a decoded log: agents, hits, casts, buff stacks, effects, missiles, states over time, lazy queries. The main API. Core arcdps only: extension events stay attached to their `Extension` and go to a registered `ExtensionDecoder`. |
 | `extensions/healingstats/` | Decoder of the healing stats addon: heals and barrier as nodes linked to the timeline agents, skills and casts, with `Heals` queries. One package per extension under `extensions/`, each registering its decoder in `init`.                           |
+| `combine/`                 | Merges the recordings several players made of one fight into one log, read like any other: every agent once, every event once. Built on the timelines of the recordings. See "The combine package" below.                                              |
 | `cmd/evtcparser/`          | Tiny command printing a log summary.                                                                                                                                                                                                                   |
+| `cmd/evtccombine/`         | Tiny command writing the log that combines the recordings given.                                                                                                                                                                                       |
 | `examples/sabetha/`        | A full raid report written with the public API only. Run it after API changes: `go run ./examples/sabetha`.                                                                                                                                            |
 | `tests_fixtures/`          | Sample logs (`*.zevtc`), used by integration tests when present. Not part of the API.                                                                                                                                                                  |
 
@@ -68,6 +71,60 @@ the graph. The arcdps reference is
   `example_readme_test.go`, a `sample_test.go` on the Sabetha log and a
   `reallogs_test.go` under `EVTC_REAL_LOGS`.
 
+## The combine package (`combine/`)
+
+Read `combine/README.md` first: the rule of every class of events and the
+conventions. `Logs` ranks the logs, builds their timelines and runs
+`combine` (`combine.go`).
+
+- `rules.go`: one rule per event kind (its class, the fields that hold an
+  address, what names a message, the state it sets), and the typing of
+  the older format, a copy of `timeline/legacy.go`. A kind added to
+  `state.go` gets a rule here: `TestRulesCoverKinds` fails otherwise.
+  `tracks` is a copy of `tracksAgent` of the timeline.
+- `clock.go`: the offset between two recordings, from the strikes both
+  hold once, or from the ticks of the server when they share too few and
+  were made in the same instance, and what tells two fights apart.
+- `agents.go`: from the table entries of the recordings to the agents of
+  the combined log (`entities`), the spans an agent is there over
+  (`presence`) and the entry that speaks for it over time (`segments`).
+- `gather.go`: reads the recordings in turn (`read`), pairs the messages
+  of each with those gathered (`pair`, `claim`), keeps the rest (`keep`)
+  and names the masters the recordings left out (`masters`). `carry.go`:
+  the states carried over when the speaker of an agent changes.
+  `settle.go`: drops what tells again what the combined log holds,
+  numbers the buff stacks, gives the leave of an agent the team the
+  entries that knew it told and keeps the one event that names a master
+  no other event does.
+- The package never changes the logs it is given, and the timeline knows
+  nothing of it.
+- The combined log holds all the recordings tell. A recording that
+  started late or stopped early, the one read first included, leaves the
+  others to tell: a rule that keeps the events of the first recording
+  alone loses the rest of the fight.
+- What names an event is its content; the time only tells apart the
+  events of one content, and the agents that carried one instance id.
+  The thresholds are measures on real recordings (`windows`, `gain`,
+  `relay`, `sameBound`, `shared`, `startTolerance`, `MinStrikes`,
+  `MinTicks`). Before changing one, run `TestRealLogs` on recordings of
+  one fight and compare its report: messages left alone near one of their
+  content, events told twice, states that differ, how far apart the pairs
+  were dated.
+- `Logs` gives the same log for the same logs, whatever the order given:
+  no map is ranged over where the order of its keys could reach the
+  outcome. `FuzzLogs` compares both orders.
+- A log combined with itself, or with what a client that stopped early
+  holds of it, comes back event by event: `sameEvents` compares them on
+  every real log. Totals alone let wrong agents through: a change that
+  moves what `sameEvents` accepts needs a reason in the README.
+- `invariants_test.go` holds the checks of a combined log
+  (`checkInvariants`, `sameEvents`, `unpaired`, `toldTwice`, `states`,
+  `margins`, `inversions`), `gen_test.go` a generator of fights recorded
+  by several clients, with what happened in them (`genFight`), and
+  `helpers_test.go` a scene several clients record (`newScene`) and what
+  a client that stopped early or wrote under other addresses holds of a
+  log (`cut`, `moved`).
+
 ## Rules that must hold
 
 - Exact sizing: every slice carved from an arena has `len == cap` after
@@ -105,6 +162,7 @@ the graph. The arcdps reference is
   fails otherwise. Comments are short English sentences.
 - The cookbook in `timeline/README.md` is a verbatim copy of the Example
   functions in `timeline/example_readme_test.go`: change both together.
+  The same holds for `combine/README.md` and each extension.
 - A log written by `WriteTo` or `WriteFile` reads back as it was
   (`FuzzParse`). The bytes are those arcdps wrote, the four bytes of
   padding that end each agent aside.
@@ -118,6 +176,9 @@ go test ./timeline -run XXX -fuzz FuzzEvents -fuzztime 30s   # after touching bu
 EVTC_REAL_LOGS=1 go test ./timeline -run TestRealLogs -v     # every log under tests_fixtures/, or under EVTC_REAL_LOGS=<folder>: invariants, API smoke, event coverage report
 EVTC_REAL_LOGS=1 go test ./extensions/healingstats -run TestRealLogs -v   # same folders, every log with the healing addon: invariants, merge report
 go test ./extensions/healingstats -run XXX -fuzz FuzzDecode -fuzztime 30s # after touching its build.go
+EVTC_REAL_LOGS=1 go test ./combine -run TestRealLogs -v      # same folders: every log with itself and with a client that stopped early, then the recordings of one fight together
+go test ./combine -run XXX -fuzz FuzzLogs -fuzztime 30s      # after touching gather.go, carry.go or settle.go
+go test ./combine -bench . -benchmem                  # reference: ~800 ns and 1 kB per event read
 ```
 
 - Test files are named after the source file they exercise
@@ -130,7 +191,9 @@ go test ./extensions/healingstats -run XXX -fuzz FuzzDecode -fuzztime 30s # afte
   synthetic generator `genLog` in `gen_test.go`, and `mustBuild`.
   `sample_test.go` runs against
   `tests_fixtures/sabetha-05-fd9b6f3a.zevtc` when present and skips
-  otherwise.
+  otherwise. `TestRecordings` of `combine` reads four recordings of one
+  Deimos fight from `tests_fixtures/deimos-multi-pov/` when the folder is
+  present.
 - `TestConcurrentQueries` is meant to run with `-race`, which needs cgo;
   the CI does it.
 - When adding an event kind: read its layout in the arcdps README, measure
@@ -181,6 +244,22 @@ go test ./extensions/healingstats -run XXX -fuzz FuzzDecode -fuzztime 30s # afte
   clients running the addon is written twice and the decoder pairs the
   records within `PeerWindow`; identical heals in the same millisecond
   from one client are real (one per boon granted, for example).
+- arcdps records the agents within 5,000 units of the player on each
+  axis. Two recordings of one fight do not hold the same agents, nor the
+  same events.
+- Addresses and clocks are those of a client: two recordings share
+  neither. Instance ids and what the server put in a message are the
+  same for every client. Stack numbers are given over the whole log, not
+  per agent, and two clients agree on those of the stacks both see.
+- A client that finds again an agent it lost lists it anew, under
+  another address: 5 of 77,197 entries of 152 logs hold their agent over
+  several spans. It writes the stacks the agent wears as applications, in
+  the millisecond of the spawn or after it, never before.
+- Two squads that fight the same boss at the same time, each in its own
+  instance of the map, share strikes by chance: 10 to 40 measured, with
+  gaps minutes apart. Recordings of one fight share thousands, whose
+  gaps stand within 300 ms of their median, and their server clocks agree
+  within a second.
 - An extension keeps a list of agents of its own. Its events may name an
   address no table lists, or the address of an agent under the instance
   id and the master of another one. The master of an agent, and the
@@ -192,3 +271,31 @@ go test ./extensions/healingstats -run XXX -fuzz FuzzDecode -fuzztime 30s # afte
   and the masters are right, the addresses are those the addon kept: it
   names a gyrocopter by the address of the clone that held its instance
   id 38 s before.
+- `EffectAgentCreate` names an agent in `dst_agent`. In 5 logs of 10,565
+  it names one no table lists and no other event names.
+- A client writes `SquadCombatStart` when its log starts and
+  `SquadCombatEnd` when it ends. 24 logs of 10,565 hold more, 2 to 22 of
+  each: the squad left combat and came back to it.
+- A client writes the first events of a minion, its spawn among them,
+  before it learns whose it is: without master.
+- `TICK` (since 20260701) writes in `src_agent` the count of ticks of the
+  server since the instance started, 25 a second, the same for every
+  client of the instance within one tick; `dst_agent` is the ticks since
+  the last real update, up to 3, so the time of a tick is extrapolated;
+  `value` is the ping since 20260915. `INSTANCESTART` writes the socket
+  of the server in `value`, the same for every client of an instance.
+  Over the corpus, recordings of one instance date its start within a
+  second of each other, two instances of one map 36 s apart at the
+  least. Two recordings that share no strike are set on their ticks: the
+  offsets by ticks and by strikes agree within 18 ms on 19 pairs.
+- A client learns the master of a minion per table entry. When it lists
+  the minion anew, after losing it, it may never learn the master again:
+  in one fight of `tmp/multi-povs`, a recording lists a minion ten times
+  and names its master in three of them.
+- `TEAMCHANGE` is written when the team changes. Before 20260920 that is
+  at the leave alone, with the team the agent had in `value` and 0 in
+  `dst_agent`; a client that never learned the team writes 0 there. Since
+  20260920 the server message that changes the team, `value` old and
+  `dst_agent` new, may be dated 1 ms after the leave the client writes at
+  the same instant: a log read alone then takes the team the agent left
+  with for the team it had.

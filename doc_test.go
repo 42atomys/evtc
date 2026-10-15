@@ -15,7 +15,7 @@ import (
 // functions, methods, constants, variables, struct fields and interface
 // methods.
 func TestDocComments(t *testing.T) {
-	for _, dir := range []string{".", "timeline", "extensions/healingstats", "cmd/evtcparser", "examples/sabetha"} {
+	for _, dir := range []string{".", "timeline", "combine", "extensions/healingstats", "cmd/evtcparser", "cmd/evtccombine", "examples/sabetha"} {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			t.Fatal(err)

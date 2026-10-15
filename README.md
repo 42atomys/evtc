@@ -4,8 +4,9 @@
 [![ci](https://github.com/42atomys/evtc/actions/workflows/ci.yml/badge.svg)](https://github.com/42atomys/evtc/actions/workflows/ci.yml)
 
 Go tooling around the arcdps EVTC combat logs of Guild Wars 2: the file
-decoder, the timeline SDK and the decoders of arcdps extensions, each in
-its own package of this module. Standard library only.
+decoder, the timeline SDK, the decoders of arcdps extensions and the
+merge of several recordings of one fight, each in its own package of this
+module. Standard library only.
 
 ```sh
 go get github.com/42atomys/evtc@latest
@@ -16,7 +17,9 @@ go get github.com/42atomys/evtc@latest
 | `github.com/42atomys/evtc` (`evtc`) | Decodes `.evtc` and `.zevtc` files into their header, agent table, skill table and raw events, without interpretation beyond what a log can carry (`Has`) and what is wrong with it (`Warnings`), and writes a log back in a file (`WriteFile`). |
 | `github.com/42atomys/evtc/timeline` | Builds a temporal graph over a decoded log and lets you query it by time: positions, health, casts, hits, buffs, downs, breakbars. See [timeline/README.md](timeline/README.md). |
 | `github.com/42atomys/evtc/extensions/healingstats` | Decodes the events of the healing stats addon into heals and barrier linked to the timeline; importing it is enough. See [extensions/healingstats/README.md](extensions/healingstats/README.md). |
+| `github.com/42atomys/evtc/combine` | Merges the recordings several players made of one fight into one log, with every agent and every event once. See [combine/README.md](combine/README.md). |
 | `cmd/evtcparser` | Prints the header and table sizes of a log: `go run ./cmd/evtcparser fight.zevtc`. |
+| `cmd/evtccombine` | Writes the log that combines the recordings given: `go run ./cmd/evtccombine -o fight.zevtc mine.zevtc theirs.zevtc`. |
 | `examples/sabetha` | A full report of a Sabetha raid log written with the timeline API: `go run ./examples/sabetha fight.zevtc`. |
 
 ```go
@@ -50,6 +53,18 @@ if !tl.Has(evtc.CapabilityStealth) {
 for _, w := range tl.Warnings() {
 	fmt.Println(w.Code, w.Message)
 }
+```
+
+arcdps records what happens within 5,000 units of the player who runs it.
+When several players recorded a fight, `combine` puts their logs together
+into one, read like any other:
+
+```go
+log, err := combine.Files("mine.zevtc", "theirs.zevtc")
+if err != nil {
+	return err
+}
+err = log.WriteFile("fight.zevtc")
 ```
 
 Requires Go 1.27. The timeline reads logs of arcdps 20240613 and later.
