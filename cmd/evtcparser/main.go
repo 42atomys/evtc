@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/42atomys/evtc"
@@ -43,5 +45,16 @@ func run(path string) error {
 	fmt.Printf("skills:    %d\n", len(l.Skills))
 	fmt.Printf("events:    %d\n", len(l.Events))
 	fmt.Printf("parsed in: %s\n", time.Since(start).Round(time.Millisecond))
+	build, _ := strconv.Atoi(strings.TrimSpace(l.Header.Build))
+	for _, c := range l.Missing() {
+		if build < c.FirstBuild() {
+			fmt.Printf("missing:   %v, written from arcdps %d\n", c, c.FirstBuild())
+		} else {
+			fmt.Printf("missing:   %v, none in this log\n", c)
+		}
+	}
+	for _, w := range l.Warnings() {
+		fmt.Printf("warning:   %v: %s\n", w.Code, w.Message)
+	}
 	return nil
 }

@@ -3,6 +3,7 @@ package healingstats
 import (
 	"time"
 
+	"github.com/42atomys/evtc"
 	"github.com/42atomys/evtc/timeline"
 )
 
@@ -15,10 +16,10 @@ const Signature = timeline.ExtensionHealingStats
 const SupportedRevision = 2
 
 // PeerWindow is how far apart the two records of one heal may be when the
-// clients of both parties wrote it: the record of the recording player's
-// own client comes first and the copy shared by the squad member follows
-// within a few hundred milliseconds.
-const PeerWindow = 500 * time.Millisecond
+// clients of both parties wrote it. The recording client writes its own
+// record at once and the copy a squad member shares when it comes: within
+// a few hundred milliseconds for most, after tens of seconds for some.
+const PeerWindow = time.Minute
 
 // Stats is the healing graph of a log: every heal and barrier the healing
 // stats addon wrote, linked to the agents, skills and casts of the
@@ -50,6 +51,11 @@ type Stats struct {
 	// source and the client of their destination, whose two records were
 	// merged into one heal.
 	Merged int
+	// LeftOut lists the records behind no heal, in time order: those the
+	// client of a destination wrote of a heal the client of its source did
+	// not tell, although it writes the heals it deals. The addon counts a
+	// heal by the record of the client of its source.
+	LeftOut []*evtc.Event
 
 	agents []*Agent
 	// players are the nodes of the characters of the players.

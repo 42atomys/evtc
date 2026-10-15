@@ -21,13 +21,16 @@ import (
 type Heal struct {
 	// Event is the record of the heal. When both the client of the source
 	// and the client of the destination wrote it, Event is the record of
-	// the recording player's own client and PeerEvent the other one.
+	// the recording player's own client and PeerEvent the other one;
+	// between two squad members, Event is the earlier record.
 	Event *evtc.Event
 	// PeerEvent is the second record of the heal, nil when it was written
 	// once. Both records describe the same heal; only the client that
 	// wrote them differs.
 	PeerEvent *evtc.Event
-	// Time is the time of the heal.
+	// Time is the time of the heal, that of Event. The recording client
+	// writes its own records at once and those a squad member shares when
+	// they come.
 	Time time.Duration
 	// Src is the healing agent, never nil.
 	Src *Agent

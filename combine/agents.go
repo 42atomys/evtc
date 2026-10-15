@@ -1,0 +1,974 @@
+package combine
+
+import (
+	"cmp"
+	"slices"
+	"time"
+
+	"github.com/42atomys/evtc"
+	"github.com/42atomys/evtc/timeline"
+)
+
+// appearance is how far apart two recordings may date the moment an agent
+// appeared and still speak of the same appearance.
+const appearance = time.Second
+
+// sameBound is how far apart two recordings may date the same spawn,
+// leave or change of state.
+const sameBound = 500 * time.Millisecond
+
+// shared is the least time two entries of two recordings share to be held
+// at once: the clocks of two recordings are set within some milliseconds,
+// and an agent that leaves when the next one of its instance id comes
+// shares an instant with it.
+const shared = 100 * time.Millisecond
+
+// forever is the until of an agent no other one follows.
+const forever = time.Duration(1<<63 - 1)
+
+// set holds recordings, one bit each.
+type set uint64
+
+func (s set) has(i int) bool { return s&(1<<uint(i)) != 0 }
+func (s *set) add(i int)     { *s |= 1 << uint(i) }
+
+// recording is one of the logs to combine.
+type recording struct {
+	tl    *timeline.Timeline
+	typed bool
+	// off is the time of this recording minus the time of the first one
+	// for the same instant.
+	off time.Duration
+	// epoch is the raw time of the zero of the timeline.
+	epoch int64
+	// span is what the recording covers, on the clock of the first one.
+	span timeline.Interval
+	// entity holds the agent of the combined log for each entry, and
+	// entry the number of each entry among those of every recording.
+	entity map[*timeline.Agent]*entity
+	entry  map[*timeline.Agent]int32
+	// members lists the entries of this recording per agent of the
+	// combined log.
+	members map[*entity][]*timeline.Agent
+	// unnamed holds the entries left out of the combined log: agents
+	// without instance id that nothing tells apart from a recording to the
+	// other.
+	unnamed map[*timeline.Agent]bool
+	// given holds the agent the timeline of the recording gave to the
+	// events that do not name it fully: those written without address,
+	// which name the last agent seen with their instance id, and those
+	// written without instance id with the address the characters of a
+	// player share.
+	given map[*evtc.Event]*timeline.Agent
+}
+
+// at returns the time of an event on the clock of the first recording.
+func (r *recording) at(e *evtc.Event) time.Duration { return r.tl.TimeOf(e) - r.off }
+
+// entity is one agent of the combined log, whatever the number of table
+// entries the recordings hold for it.
+type entity struct {
+	id   int32
+	kind timeline.Kind
+	inst uint16
+	addr uint64
+	raw  *evtc.Agent
+	// holds lists what every entry held of the agent.
+	holds []hold
+	// speak tells which entry speaks for the agent over time: the
+	// samples and the states of the agent come from one entry at a time.
+	speak []segment
+	// owners holds the recordings of the player of the agent: a client
+	// knows its own character best.
+	owners set
+	// until is when the next agent of the same instance id starts: the
+	// agent left before. seen holds the recordings that hold that next
+	// agent from its start: what such a recording writes of this agent
+	// afterwards, its own timeline gave to it.
+	until time.Duration
+	seen  set
+	// spans lists the spans of presence of the agent: what the entries
+	// held, united.
+	spans []timeline.Interval
+	// first is when the earliest of the recordings started.
+	first time.Duration
+	// known tells an agent a table lists, or that an event names by its
+	// address, those of extensions aside: an extension keeps a list of
+	// agents of its own.
+	known bool
+	// master is the agent a recording names as the master of this one,
+	// and masterInst the instance id it writes for it. named holds the
+	// entries that name it: a client learns the master of a minion per
+	// entry, and may list the minion anew without learning it again.
+	master     *entity
+	masterInst uint16
+	named      []int32
+}
+
+// hold is what one table entry of a recording held of an agent.
+type hold struct {
+	rec   int
+	entry int32
+	agent *timeline.Agent
+	// life spans the events of the entry, track what the recording held:
+	// from its spawn, or the start of the log, to its last leave, or the
+	// end of the log. Both are on the clock of the first recording.
+	life, track timeline.Interval
+	// held lists the spans over which the entry wrote it held the agent:
+	// a squad member keeps its entry when it leaves and comes back.
+	held   []timeline.Interval
+	spawns []time.Duration
+	leaves []time.Duration
+}
+
+// segment is a span over which one entry speaks for an agent.
+type segment struct {
+	iv    timeline.Interval
+	rec   int
+	entry int32
+}
+
+// node is an entry on its way to an agent of the combined log.
+type node struct {
+	hold
+	pos    timeline.Vec3
+	hasPos bool
+	still  bool
+	events int
+	parent int
+	// skip leaves the entry out of the combined log.
+	skip bool
+	// known is what entity.known tells of the entry.
+	known bool
+}
+
+// present reports whether an entry held the agent at t.
+func (x *entity) present(t time.Duration) bool {
+	for _, iv := range x.spans {
+		if iv.Contains(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// start returns when the first entry started to hold the agent.
+func (x *entity) start() time.Duration {
+	t := forever
+	for i := range x.holds {
+		t = min(t, x.holds[i].track.Start)
+	}
+	return t
+}
+
+// hold returns what the entry held of the agent.
+func (x *entity) hold(entry int32) *hold {
+	for i := range x.holds {
+		if x.holds[i].entry == entry {
+			return &x.holds[i]
+		}
+	}
+	return nil
+}
+
+// span returns the number of the span of presence that holds t, or the
+// nearest one.
+func (x *entity) span(t time.Duration) int {
+	best, dist := -1, forever
+	for i, iv := range x.spans {
+		if d := max(iv.Start-t, t-iv.End, 0); d < dist {
+			best, dist = i, d
+		}
+	}
+	return best
+}
+
+// inner reports whether a bound written at t lies inside the life of the
+// agent: further than sameBound from the start of its span of presence
+// for a spawn, from its end for a leave. A bound inside the span stays
+// when every entry that held the agent across it wrote it: what the
+// recordings agree on is told, odd as it is.
+func (x *entity) inner(t time.Duration, spawn bool) bool {
+	i := x.span(t)
+	if i < 0 {
+		return false
+	}
+	if sp := x.spans[i]; (spawn && t-sp.Start <= sameBound) || (!spawn && sp.End-t <= sameBound) {
+		return false
+	}
+	covered, agreed := false, true
+	for i := range x.holds {
+		h := &x.holds[i]
+		bounds := h.leaves
+		if spawn {
+			bounds = h.spawns
+		}
+		for _, iv := range h.held {
+			across := iv.Start <= t && iv.End > t+sameBound
+			if spawn {
+				across = iv.Start < t-sameBound && iv.End >= t
+			}
+			if across {
+				covered = true
+				agreed = agreed && near(bounds, t)
+			}
+		}
+	}
+	return !covered || !agreed
+}
+
+// speaker returns the segment that holds t, nil when no entry speaks
+// then.
+func (x *entity) speaker(t time.Duration) *segment {
+	for i := range x.speak {
+		if x.speak[i].iv.Contains(t) {
+			return &x.speak[i]
+		}
+	}
+	return nil
+}
+
+// speaks reports whether the entry may tell a sample or a state of the
+// agent at t: it speaks then, or nobody does.
+func (x *entity) speaks(entry int32, t time.Duration) bool {
+	s := x.speaker(t)
+	return s == nil || s.entry == entry
+}
+
+// near reports whether one of the times is within sameBound of t.
+func near(times []time.Duration, t time.Duration) bool {
+	for _, b := range times {
+		if b >= t-sameBound && b <= t+sameBound {
+			return true
+		}
+	}
+	return false
+}
+
+// presence returns the spans over which an entry at least held the agent,
+// in time order. A gap is one when a recording tells it: it wrote that the
+// agent left and that it came back. A leave of a recording and a spawn of
+// another one less than sameBound apart are two clients that do not date
+// alike what they see: no gap.
+func presence(holds []hold) []timeline.Interval {
+	type part struct {
+		iv  timeline.Interval
+		rec int
+	}
+	var parts []part
+	for i := range holds {
+		for _, iv := range holds[i].held {
+			parts = append(parts, part{iv, holds[i].rec})
+		}
+	}
+	if len(parts) == 0 {
+		return nil
+	}
+	slices.SortFunc(parts, func(a, b part) int { return cmp.Compare(a.iv.Start, b.iv.Start) })
+	var united []timeline.Interval
+	for _, p := range parts {
+		if n := len(united); n > 0 && p.iv.Start <= united[n-1].End {
+			united[n-1].End = max(united[n-1].End, p.iv.End)
+			continue
+		}
+		united = append(united, p.iv)
+	}
+	told := func(left, right timeline.Interval) bool {
+		ends, starts := map[int]bool{}, map[int]bool{}
+		for _, p := range parts {
+			// What a recording held last of the span before, and first
+			// of the span after.
+			if p.iv.End >= left.Start && p.iv.End <= left.End && left.End-p.iv.End <= sameBound {
+				ends[p.rec] = true
+			}
+			if p.iv.Start >= right.Start && p.iv.Start <= right.End && p.iv.Start-right.Start <= sameBound {
+				starts[p.rec] = true
+			}
+		}
+		for rec := range ends {
+			if starts[rec] {
+				return true
+			}
+		}
+		return false
+	}
+	out := united[:1]
+	for _, iv := range united[1:] {
+		last := &out[len(out)-1]
+		if iv.Start-last.End <= sameBound && !told(*last, iv) {
+			last.End = max(last.End, iv.End)
+			continue
+		}
+		out = append(out, iv)
+	}
+	return out
+}
+
+// segments shares the life of an agent between its entries. The client of
+// the player speaks for its character. Otherwise the entry that held the
+// agent the longest speaks over all it held, then the next one over what
+// is left, and so on: a view that blinks does not interrupt one that
+// lasts. Entries that held the agent as long, within a second, speak in
+// the order of the recordings.
+func segments(holds []hold, owners set) []segment {
+	owned := func(h *hold) bool { return owners.has(h.rec) }
+	order := make([]int, len(holds))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(i, j int) int {
+		a, b := &holds[i], &holds[j]
+		if owned(a) != owned(b) {
+			if owned(a) {
+				return -1
+			}
+			return 1
+		}
+		if c := cmp.Compare(b.track.Duration()/time.Second, a.track.Duration()/time.Second); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.rec, b.rec); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.track.Start, b.track.Start)
+	})
+	var out []segment
+	for _, i := range order {
+		h := &holds[i]
+		// What is left of the span once the spans given are taken off.
+		left := []timeline.Interval{h.track}
+		for _, s := range out {
+			var next []timeline.Interval
+			for _, iv := range left {
+				if !iv.Overlaps(s.iv) {
+					next = append(next, iv)
+					continue
+				}
+				if iv.Start < s.iv.Start {
+					next = append(next, timeline.Interval{Start: iv.Start, End: s.iv.Start - time.Millisecond})
+				}
+				if iv.End > s.iv.End {
+					next = append(next, timeline.Interval{Start: s.iv.End + time.Millisecond, End: iv.End})
+				}
+			}
+			left = next
+		}
+		for _, iv := range left {
+			out = append(out, segment{iv: iv, rec: h.rec, entry: h.entry})
+		}
+	}
+	slices.SortFunc(out, func(a, b segment) int { return cmp.Compare(a.iv.Start, b.iv.Start) })
+
+	// Two clients date the same spawn some milliseconds apart: what the
+	// first one holds alone before the other starts is no span of its
+	// own, the other tells what the agent is when it gains it. What the
+	// last one tells after the other lost the agent, nobody else tells.
+	starts := map[int32]time.Duration{}
+	for i := range holds {
+		starts[holds[i].entry] = holds[i].track.Start
+	}
+	kept := out[:0]
+	for i := 0; i < len(out); i++ {
+		sg := out[i]
+		if sg.iv.Duration() < sameBound {
+			if i+1 < len(out) && out[i+1].entry != sg.entry && out[i+1].iv.Start == sg.iv.End+time.Millisecond &&
+				starts[sg.entry] == sg.iv.Start && starts[out[i+1].entry] == out[i+1].iv.Start {
+				out[i+1].iv.Start = sg.iv.Start
+				continue
+			}
+		}
+		kept = append(kept, sg)
+	}
+	return kept
+}
+
+// union joins the groups of two entries unless that would put in one
+// agent two entries a recording holds at the same time: by its own
+// account they are two agents.
+func union(nodes []node, groups map[int][]int, i, j int) {
+	ri, rj := find(nodes, i), find(nodes, j)
+	if ri == rj {
+		return
+	}
+	gi, gj := groups[ri], groups[rj]
+	if gi == nil {
+		gi = []int{ri}
+	}
+	if gj == nil {
+		gj = []int{rj}
+	}
+	for _, a := range gi {
+		for _, b := range gj {
+			x, y := &nodes[a], &nodes[b]
+			if x.rec == y.rec && x.agent.Kind != timeline.KindPlayer && x.events > 0 && y.events > 0 &&
+				x.life.Start < y.life.End && y.life.Start < x.life.End {
+				return
+			}
+		}
+	}
+	nodes[rj].parent = ri
+	groups[ri] = append(gi, gj...)
+	delete(groups, rj)
+}
+
+// find returns the root of the group of an entry.
+func find(nodes []node, i int) int {
+	for nodes[i].parent != i {
+		nodes[i].parent = nodes[nodes[i].parent].parent
+		i = nodes[i].parent
+	}
+	return i
+}
+
+// sameIdentity reports whether two entries may name the same agent: same
+// kind, same instance id, same species for an NPC.
+func sameIdentity(a, b *timeline.Agent) bool {
+	if a.Kind != b.Kind {
+		return false
+	}
+	if a.Kind == timeline.KindPlayer {
+		if a.Player == nil || b.Player == nil || a.Player.Account != b.Player.Account || a.Name != b.Name {
+			return false
+		}
+		// A log of a public instance names the other players by their
+		// profession and leaves their account out: the instance id
+		// tells them apart.
+		return a.Player.Account != "" || a.InstanceID == b.InstanceID
+	}
+	if a.InstanceID != b.InstanceID {
+		return false
+	}
+	if a.InstanceID == 0 {
+		// Nothing but the name and the species to go by.
+		return a.Name == b.Name && a.SpeciesID == b.SpeciesID
+	}
+	return a.Kind != timeline.KindNPC || a.SpeciesID == b.SpeciesID
+}
+
+// shares reports whether two tracks share time: shared or more, or all of
+// the shorter one.
+func shares(a, b timeline.Interval) bool {
+	o := min(a.End, b.End) - max(a.Start, b.Start)
+	if o <= 0 {
+		return false
+	}
+	within := (a.Start >= b.Start && a.End <= b.End) || (b.Start >= a.Start && b.End <= a.End)
+	return o >= shared || within
+}
+
+// lagged reports whether two entries of two recordings share time only
+// because one client learned later than the other that an agent left or
+// that the next one came: the entry that starts first ends within
+// sameBound after the other one starts, and the recording of either wrote
+// the same bound for another entry. Both recordings tell of two agents
+// then.
+func lagged(nodes []node, ids []int, i, j int) bool {
+	a, b := &nodes[i], &nodes[j]
+	if b.track.Start < a.track.Start {
+		a, b = b, a
+	}
+	if a.track.End >= b.track.End || a.track.End-b.track.Start > sameBound {
+		return false
+	}
+	for _, o := range ids {
+		n := &nodes[o]
+		if n == a || n == b || !sameIdentity(n.agent, a.agent) {
+			continue
+		}
+		// The recording of the second entry held the first agent too,
+		// and wrote that it left.
+		if n.rec == b.rec && len(n.leaves) > 0 && len(a.leaves) > 0 && n.track.End <= b.track.Start && a.track.End-n.track.End <= sameBound {
+			return true
+		}
+		// The recording of the first entry holds the second agent too,
+		// and wrote that it came.
+		if n.rec == a.rec && len(n.spawns) > 0 && len(b.spawns) > 0 && n.track.Start >= a.track.End && n.track.Start-b.track.Start <= sameBound {
+			return true
+		}
+	}
+	return false
+}
+
+// join joins the entries of one bucket that name the same agent of the
+// game. Entries of two recordings are the same appearance when they
+// started together, one entry of each recording at most; entries that held
+// the agent at the same time are the same agent, which joins the entries a
+// recording split when another one went on holding the agent; an agent
+// that never moved, met by two recordings at other times, is told by its
+// position when its instance id served once.
+func join(nodes []node, ids []int) {
+	type pair struct {
+		i, j int
+		d    time.Duration
+	}
+	if a := nodes[ids[0]].agent; a.Kind != timeline.KindPlayer && a.InstanceID == 0 {
+		// Nothing tells apart the agents without instance id that carry
+		// the same name: the first recording that holds some keeps its
+		// own.
+		perRec := map[int]int{}
+		first := nodes[ids[0]].rec
+		for _, i := range ids {
+			perRec[nodes[i].rec]++
+			first = min(first, nodes[i].rec)
+		}
+		for _, n := range perRec {
+			if n > 1 {
+				for _, i := range ids {
+					nodes[i].skip = nodes[i].rec > first
+				}
+				return
+			}
+		}
+	}
+	groups := map[int][]int{}
+	var pairs []pair
+	for x := range ids {
+		for y := x + 1; y < len(ids); y++ {
+			i, j := ids[x], ids[y]
+			if nodes[i].rec == nodes[j].rec || !sameIdentity(nodes[i].agent, nodes[j].agent) {
+				continue
+			}
+			d := nodes[i].track.Start - nodes[j].track.Start
+			if d < 0 {
+				d = -d
+			}
+			pairs = append(pairs, pair{i, j, d})
+		}
+	}
+	slices.SortStableFunc(pairs, func(a, b pair) int { return cmp.Compare(a.d, b.d) })
+	type seat struct{ node, rec int }
+	taken := map[seat]bool{}
+	for _, p := range pairs {
+		if nodes[p.i].agent.Kind == timeline.KindPlayer {
+			union(nodes, groups, p.i, p.j)
+			continue
+		}
+		if p.d > appearance {
+			break
+		}
+		si, sj := seat{p.i, nodes[p.j].rec}, seat{p.j, nodes[p.i].rec}
+		if taken[si] || taken[sj] {
+			continue
+		}
+		taken[si], taken[sj] = true, true
+		union(nodes, groups, p.i, p.j)
+	}
+	for _, p := range pairs {
+		x, y := &nodes[p.i], &nodes[p.j]
+		if shares(x.track, y.track) {
+			// An instance id names one agent at a time: entries whose
+			// events share time are the same agent; those that meet at
+			// one instant follow each other. What a recording held beyond
+			// its events is a guess, and there a still agent that stands
+			// elsewhere is another one.
+			events := x.life.Start < y.life.End && y.life.Start < x.life.End
+			if !events && x.hasPos && y.hasPos && x.still && y.still && x.pos.DistTo(y.pos) > 50 {
+				continue
+			}
+			if lagged(nodes, ids, p.i, p.j) {
+				continue
+			}
+			union(nodes, groups, p.i, p.j)
+		}
+	}
+	// The position tells nothing of an instance id that served several
+	// times: creatures come back where they were.
+	perRec := map[int]int{}
+	for _, i := range ids {
+		perRec[nodes[i].rec]++
+	}
+	for _, n := range perRec {
+		if n > 1 {
+			return
+		}
+	}
+	for _, p := range pairs {
+		x, y := &nodes[p.i], &nodes[p.j]
+		if x.hasPos && y.hasPos && x.still && y.still && x.pos.DistTo(y.pos) < 5 {
+			union(nodes, groups, p.i, p.j)
+		}
+	}
+}
+
+// heldOf returns the spans over which an entry held its agent, by the
+// spawns and the leaves it wrote: from the start of its track to its
+// first leave, then from every spawn to the next leave, the end of its
+// track closing what is left open. A leave that follows a leave moves the
+// end when the entry told something in between: the agent was there.
+// Alone, it is a despawn written without address that names the last agent
+// seen with its instance id, long gone.
+func heldOf(n *node, r *recording, evs []*evtc.Event) []timeline.Interval {
+	var out []timeline.Interval
+	open, from, told := true, n.track.Start, false
+	for _, e := range evs {
+		t := r.at(e)
+		switch {
+		case e.IsStateChange == evtc.StateSpawn:
+			if !open {
+				open, from = true, t
+			}
+		case isLeave(e, e.IsStateChange):
+			switch {
+			case open && t >= from:
+				out = append(out, timeline.Interval{Start: from, End: t})
+				open = false
+			case len(out) > 0 && (told || t-out[len(out)-1].End <= sameBound):
+				out[len(out)-1].End = max(out[len(out)-1].End, t)
+			}
+			told = false
+		default:
+			// An event written without address names the last agent
+			// seen with its instance id: it tells nothing of this one.
+			named := e.SrcAgent == n.agent.Addr || e.DstAgent == n.agent.Addr || n.agent.Kind == timeline.KindPlayer
+			told = told || (!open && named)
+		}
+	}
+	if open && n.track.End >= from {
+		out = append(out, timeline.Interval{Start: from, End: n.track.End})
+	}
+	if len(out) == 0 {
+		out = append(out, n.track)
+	}
+	return out
+}
+
+// entries lists the table entries of every recording with the span of
+// their events and the span over which the recording held the agent.
+func entries(recs []*recording) []node {
+	var nodes []node
+	for ri, r := range recs {
+		from := len(nodes)
+		for _, a := range r.tl.Agents().All() {
+			evs := a.Events().All()
+			// Another recording brings nothing of an agent it has no
+			// event of, players aside: their entries name them.
+			if len(evs) == 0 && ri > 0 && a.Kind != timeline.KindPlayer {
+				continue
+			}
+			// The instance ids the recording names the agent under, by
+			// its address. The events of an extension name the agents of
+			// its addon, which may be others.
+			under := map[uint16]bool{}
+			for _, e := range evs {
+				rl := ruleOf(e, kindOf(e, r.typed), r.typed)
+				if rl.class == classExtension || rl.class.ofRecording() {
+					continue
+				}
+				if rl.src && e.SrcAgent != 0 && r.tl.AgentOf(e.SrcAgent, e.SrcInstanceID) == a {
+					under[e.SrcInstanceID] = true
+				}
+				if rl.dst && e.DstAgent != 0 && r.tl.AgentOf(e.DstAgent, e.DstInstanceID) == a {
+					under[e.DstInstanceID] = true
+				}
+			}
+			for _, e := range evs {
+				// An agent holds the events it is the source or the
+				// destination of. It is the source of those written
+				// without address under an instance id it carries, unless
+				// their destination is its address, and of those written
+				// without instance id under its address.
+				rl := ruleOf(e, kindOf(e, r.typed), r.typed)
+				if !rl.src {
+					continue
+				}
+				switch {
+				case e.SrcAgent == 0 && e.SrcInstanceID != 0:
+					if p := r.tl.Agent(e.DstAgent); rl.dst && e.DstAgent != 0 && p != nil && p.Addr == a.Addr {
+						continue
+					}
+				case e.SrcAgent != 0 && e.SrcInstanceID == 0 && a.Player != nil:
+					if p := r.tl.Agent(e.SrcAgent); p == nil || p.Addr != a.Addr {
+						continue
+					}
+				default:
+					continue
+				}
+				r.given[e] = a
+			}
+			n := node{parent: len(nodes), events: len(evs), known: a.Raw != nil || len(under) > 0}
+			n.rec, n.agent, n.entry = ri, a, int32(len(nodes)+1)
+			r.entry[a] = n.entry
+			// The life of an entry spans the events arcdps wrote of it: an
+			// extension may name the address of an agent that left for the
+			// one that took its instance id, and stretch its life over the
+			// next entry of the recording.
+			n.life = timeline.Interval{Start: a.Lifetime.Start - r.off, End: a.Lifetime.End - r.off}
+			core := false
+			for _, e := range evs {
+				if rl := ruleOf(e, kindOf(e, r.typed), r.typed); rl.class == classExtension || rl.class.ofRecording() {
+					continue
+				}
+				if t := r.at(e); !core {
+					n.life, core = timeline.Interval{Start: t, End: t}, true
+				} else {
+					n.life.Start, n.life.End = min(n.life.Start, t), max(n.life.End, t)
+				}
+			}
+			n.track = n.life
+			if len(evs) > 0 {
+				spawned, gone := false, false
+				for _, e := range evs {
+					switch {
+					case e.IsStateChange == evtc.StateSpawn:
+						n.spawns = append(n.spawns, r.at(e))
+						// An entry that left before was there from the
+						// start.
+						if !spawned && !gone {
+							spawned = true
+							n.track.Start = r.at(e)
+						}
+					case isLeave(e, e.IsStateChange):
+						// The leave a recording writes last ends what it
+						// held, at a despawn or at the end of its log.
+						n.leaves = append(n.leaves, r.at(e))
+						gone = true
+						n.track.End = r.at(e)
+					}
+				}
+				if !spawned && a.Lifetime.Start <= time.Second {
+					n.track.Start = min(n.track.Start, -r.off)
+				}
+				if !gone {
+					n.track.End = max(n.track.End, r.tl.Duration-r.off)
+				}
+			}
+			n.held = heldOf(&n, r, evs)
+			n.track = timeline.Interval{Start: n.held[0].Start, End: n.held[len(n.held)-1].End}
+			if a.Kind == timeline.KindPlayer {
+				// A squad member is held all along.
+				n.track = timeline.Interval{Start: min(n.track.Start, -r.off), End: max(n.track.End, r.tl.Duration-r.off)}
+			}
+			if f, ok := a.Position.First(); ok {
+				n.pos, n.hasPos, n.still = f.Value, true, a.Position.Len() == 1
+			}
+			nodes = append(nodes, n)
+		}
+		// An instance id names one agent at a time: an entry stops
+		// holding it when the next one of that id starts.
+		type id struct {
+			kind timeline.Kind
+			inst uint16
+		}
+		by := map[id][]int{}
+		for i := from; i < len(nodes); i++ {
+			a := nodes[i].agent
+			if a.Kind != timeline.KindPlayer && a.InstanceID != 0 && nodes[i].events > 0 {
+				by[id{a.Kind, a.InstanceID}] = append(by[id{a.Kind, a.InstanceID}], i)
+			}
+		}
+		for _, l := range by {
+			slices.SortFunc(l, func(i, j int) int { return cmp.Compare(nodes[i].track.Start, nodes[j].track.Start) })
+			for x := 0; x+1 < len(l); x++ {
+				cur, nxt := &nodes[l[x]], &nodes[l[x+1]]
+				if cur.track.End >= nxt.track.Start {
+					cur.track.End = max(cur.life.End, min(cur.track.End, nxt.track.Start-time.Millisecond))
+					var left []timeline.Interval
+					for _, iv := range cur.held {
+						if iv.End = min(iv.End, cur.track.End); iv.End >= iv.Start {
+							left = append(left, iv)
+						}
+					}
+					cur.held = left
+				}
+			}
+		}
+	}
+	return nodes
+}
+
+// masterOf returns the master a recording names for an agent: the one its
+// timeline gives the agent, when an event names the agent by its address
+// with that master. A player has none. An event of an extension names the
+// agents of its addon, which may be others: it gives none.
+func masterOf(r *recording, a *timeline.Agent) *timeline.Agent {
+	of := a.Master
+	if of == nil || of == r.tl.Unknown || of.InstanceID == 0 || a.Kind == timeline.KindPlayer {
+		return nil
+	}
+	for _, e := range a.Events().All() {
+		rl := ruleOf(e, kindOf(e, r.typed), r.typed)
+		if rl.class == classExtension || rl.class.ofRecording() {
+			continue
+		}
+		if rl.src && e.SrcAgent != 0 && e.SrcMasterInstanceID == of.InstanceID && r.tl.AgentOf(e.SrcAgent, e.SrcInstanceID) == a {
+			return of
+		}
+		if rl.dst && e.DstAgent != 0 && e.DstMasterInstanceID == of.InstanceID && r.tl.AgentOf(e.DstAgent, e.DstInstanceID) == a {
+			return of
+		}
+	}
+	return nil
+}
+
+// entities joins the entries of the recordings into the agents of the
+// combined log and gives each an address: that of the first entry of the
+// first recording that holds the agent.
+func entities(recs []*recording) []*entity {
+	nodes := entries(recs)
+	type bucket struct {
+		kind timeline.Kind
+		inst uint16
+		name string
+	}
+	buckets := map[bucket][]int{}
+	for i := range nodes {
+		a := nodes[i].agent
+		b := bucket{kind: a.Kind, inst: a.InstanceID}
+		switch {
+		case a.Kind == timeline.KindPlayer:
+			b = bucket{kind: a.Kind}
+			if a.Player != nil {
+				b.name = a.Player.Account
+			}
+		case a.InstanceID == 0:
+			b.name = a.Name
+		}
+		buckets[b] = append(buckets[b], i)
+	}
+	for _, ids := range buckets {
+		join(nodes, ids)
+	}
+	groups := map[int][]int{}
+	var roots []int
+	for i := range nodes {
+		if nodes[i].skip {
+			recs[nodes[i].rec].unnamed[nodes[i].agent] = true
+			continue
+		}
+		r := find(nodes, i)
+		if _, ok := groups[r]; !ok {
+			roots = append(roots, r)
+		}
+		groups[r] = append(groups[r], i)
+	}
+
+	used := map[uint64]bool{}
+	for i := range nodes {
+		if nodes[i].rec == 0 {
+			used[nodes[i].agent.Addr] = true
+		}
+	}
+	// The first recording keeps the addresses it names no agent of its
+	// timeline at: none of them goes to an agent of another recording.
+	ref := recs[0]
+	for i := range ref.tl.Log.Events {
+		e := &ref.tl.Log.Events[i]
+		if !timed(e.IsStateChange) {
+			continue
+		}
+		rl := ruleOf(e, kindOf(e, ref.typed), ref.typed)
+		if rl.src && e.SrcAgent != 0 && ref.tl.AgentOf(e.SrcAgent, e.SrcInstanceID) == nil {
+			used[e.SrcAgent] = true
+		}
+		if rl.dst && e.DstAgent != 0 && ref.tl.AgentOf(e.DstAgent, e.DstInstanceID) == nil {
+			used[e.DstAgent] = true
+		}
+	}
+	var ents []*entity
+	next := uint64(0x7e00_0000_0000_0000)
+	// The characters of an account share its address. The players a log
+	// lists without account are not those of one account.
+	playerAddr := map[string]uint64{}
+	for _, c := range recs[0].tl.Characters().All() {
+		if c.Player.Account != "" {
+			playerAddr[c.Player.Account] = c.Addr
+		}
+	}
+	first := forever
+	for _, r := range recs {
+		first = min(first, r.span.Start)
+	}
+	for _, r := range roots {
+		ids := groups[r]
+		slices.SortStableFunc(ids, func(i, j int) int {
+			if c := cmp.Compare(nodes[i].rec, nodes[j].rec); c != 0 {
+				return c
+			}
+			return cmp.Compare(nodes[i].track.Start, nodes[j].track.Start)
+		})
+		head := nodes[ids[0]]
+		a := head.agent
+		x := &entity{id: int32(len(ents) + 1), kind: a.Kind, inst: a.InstanceID, until: forever, first: min(first, 0)}
+		for _, i := range ids {
+			nd := nodes[i]
+			if pov := recs[nd.rec].tl.POV; pov != nil && nd.agent.Player == pov {
+				x.owners.add(nd.rec)
+			}
+		}
+		switch {
+		case head.rec == 0:
+			x.addr = a.Addr
+		case a.Kind == timeline.KindPlayer && a.Player != nil && playerAddr[a.Player.Account] != 0:
+			x.addr = playerAddr[a.Player.Account]
+		case !used[a.Addr]:
+			x.addr = a.Addr
+		default:
+			for used[next] {
+				next++
+			}
+			x.addr = next
+		}
+		used[x.addr] = true
+		for _, i := range ids {
+			nd := nodes[i]
+			if x.raw == nil {
+				x.raw = nd.agent.Raw
+			}
+			x.known = x.known || nd.known
+			if nd.events > 0 {
+				x.holds = append(x.holds, nd.hold)
+			}
+			rec := recs[nd.rec]
+			rec.entity[nd.agent] = x
+			rec.members[x] = append(rec.members[x], nd.agent)
+		}
+		x.speak = segments(x.holds, x.owners)
+		x.spans = presence(x.holds)
+		ents = append(ents, x)
+	}
+
+	// The master of a minion is a field of the events that name the
+	// minion: a client that does not know it leaves it out.
+	for _, r := range recs {
+		for _, a := range r.tl.Agents().All() {
+			of := masterOf(r, a)
+			x, mx := r.entity[a], r.entity[of]
+			if x == nil || mx == nil {
+				continue
+			}
+			if x.master == nil {
+				x.master, x.masterInst = mx, of.InstanceID
+			}
+			if x.master == mx {
+				x.named = append(x.named, r.entry[a])
+			}
+		}
+	}
+
+	// An instance id names one agent at a time: an agent left when the
+	// next one of its id comes.
+	type id struct {
+		kind timeline.Kind
+		inst uint16
+	}
+	by := map[id][]*entity{}
+	for _, x := range ents {
+		if x.kind != timeline.KindPlayer && x.inst != 0 && len(x.holds) > 0 {
+			by[id{x.kind, x.inst}] = append(by[id{x.kind, x.inst}], x)
+		}
+	}
+	for _, l := range by {
+		slices.SortStableFunc(l, func(a, b *entity) int { return cmp.Compare(a.start(), b.start()) })
+		for i := 0; i+1 < len(l); i++ {
+			if next := l[i+1].start(); next > l[i].start() {
+				l[i].until = next
+				for _, h := range l[i+1].holds {
+					if h.track.Start-next <= sameBound {
+						l[i].seen.add(h.rec)
+					}
+				}
+			}
+		}
+	}
+	return ents
+}

@@ -19,11 +19,11 @@ import (
 // TestRealLogs decodes every log under ../../tests_fixtures, or under the
 // folder EVTC_REAL_LOGS names, checks the invariants of the stats and runs
 // the API on them. The report, printed with -v, tells how many heals the
-// addon logged, how many were written by both clients, and how many heals
-// between two recording players were written by one client only, which the
-// merge cannot pair. The test runs only with EVTC_REAL_LOGS set, as it
-// reads hundreds of megabytes of logs, several at a time: -parallel bounds
-// how many.
+// addon logged, how many were written by both clients, how many records
+// of a destination were left out, and how many heals between two recording
+// players the client of the source wrote alone. The test runs only with
+// EVTC_REAL_LOGS set, as it reads hundreds of megabytes of logs, several
+// at a time: -parallel bounds how many.
 func TestRealLogs(t *testing.T) {
 	dir := os.Getenv("EVTC_REAL_LOGS")
 	if dir == "" {
@@ -49,7 +49,7 @@ func TestRealLogs(t *testing.T) {
 	slices.Sort(paths)
 	var mu sync.Mutex
 	var lines []string
-	logs, heals, merged, single := 0, 0, 0, 0
+	logs, heals, merged, left, single := 0, 0, 0, 0, 0
 	var total time.Duration
 	t.Run("logs", func(t *testing.T) {
 		for _, path := range paths {
@@ -92,7 +92,7 @@ func TestRealLogs(t *testing.T) {
 					if shares := s.Heals().Healing().PerAgent(); len(shares) > 0 {
 						top = fmt.Sprintf("%s %d", shares[0].Agent.Name, shares[0].Heals.Healed())
 					}
-					line = fmt.Sprintf("%-46s %-8s rev %d %6d heals %5d merged %2d recorded %4d one-sided  top %s", name, s.Version, s.Revision, s.Heals().Count(), s.Merged, len(s.Recorded), oneSided, top)
+					line = fmt.Sprintf("%-46s %-8s rev %d %6d heals %5d merged %4d left out %2d recorded %4d one-sided  top %s", name, s.Version, s.Revision, s.Heals().Count(), s.Merged, len(s.LeftOut), len(s.Recorded), oneSided, top)
 				}
 				mu.Lock()
 				defer mu.Unlock()
@@ -102,6 +102,7 @@ func TestRealLogs(t *testing.T) {
 					logs++
 					heals += s.Heals().Count()
 					merged += s.Merged
+					left += len(s.LeftOut)
 					single += oneSided
 				}
 			})
@@ -109,7 +110,7 @@ func TestRealLogs(t *testing.T) {
 	})
 	slices.Sort(lines)
 	t.Logf("\n%s", strings.Join(lines, "\n"))
-	t.Logf("%d logs with healing stats: %d heals, %d written by both clients, %d one-sided between recording players, built in %v", logs, heals, merged, single, total.Round(time.Millisecond))
+	t.Logf("%d logs with healing stats: %d heals, %d written by both clients, %d records left out, %d one-sided between recording players, built in %v", logs, heals, merged, left, single, total.Round(time.Millisecond))
 }
 
 // smoke runs the public API the way a report would, to catch panics on

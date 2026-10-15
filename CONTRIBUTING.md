@@ -16,6 +16,7 @@ one of the builders, give the fuzzers some time:
 ```sh
 go test ./timeline -run XXX -fuzz FuzzEvents -fuzztime 30s
 go test ./extensions/healingstats -run XXX -fuzz FuzzDecode -fuzztime 30s
+go test ./combine -run XXX -fuzz FuzzLogs -fuzztime 30s
 ```
 
 and check that the benchmarks did not move
@@ -32,16 +33,26 @@ logs under `tests_fixtures/`, which git ignores:
   log of the folder, checks the invariants of the graph and reports how
   much of each log it reads. The same command on
   `./extensions/healingstats` reports the heals of the logs recorded with
-  the healing stats addon. Both take a folder instead of 1, relative to
-  the repository root or absolute.
+  the healing stats addon. On `./combine` it combines every log with
+  itself and with what a client that stopped early would hold of it, then
+  the logs of the folder that recorded the same fight with each other.
+  All take a folder instead of 1, relative to the repository root or
+  absolute.
 - The `TestSample*` tests assert exact values of one Sabetha log
   (`tests_fixtures/sabetha-05-fd9b6f3a.zevtc`) and only pass on that file.
+  `TestRecordings` does the same on four recordings of one Deimos fight
+  (`tests_fixtures/deimos-multi-pov/`).
 
 ## How the code is organized
 
-- Package `evtc` decodes the file. Interpretation belongs to `timeline`,
-  with one exception: `capability.go` and `warning.go` read the events
-  far enough to tell what a log can carry and what is wrong with it.
+- Package `evtc` decodes the file and writes it back. Interpretation
+  belongs to `timeline`, with one exception: `capability.go` and
+  `warning.go` read the events far enough to tell what a log can carry
+  and what is wrong with it.
+- Package `combine` is built on the timelines of the logs it is given
+  and holds one rule per event kind (`rules.go`): a kind added to the
+  decoder gets one. Its thresholds are measures on real recordings; run
+  its `TestRealLogs` on recordings of one fight before changing one.
 - The timeline builder works in two passes: `scan` counts every node and
   edge, `fill` creates and links them in arenas sized from those counts.
   Both passes must skip the same events. `checkInvariants`

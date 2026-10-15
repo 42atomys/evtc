@@ -1,5 +1,5 @@
 // Package evtc decodes arcdps EVTC combat logs (.evtc and zip-compressed
-// .zevtc files).
+// .zevtc files), and writes them back.
 //
 // The binary layout follows the arcdps reference:
 //   - https://www.deltaconnected.com/arcdps/evtc/README.txt

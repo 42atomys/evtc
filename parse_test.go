@@ -314,8 +314,8 @@ func TestParseEmptyTables(t *testing.T) {
 	}
 }
 
-// FuzzParse checks that no input makes Parse panic and that a decoded log
-// is internally consistent.
+// FuzzParse checks that no input makes Parse panic, that a decoded log is
+// internally consistent and that it is written back as it was read.
 func FuzzParse(f *testing.F) {
 	raw := buildLog()
 	f.Add(raw)
@@ -342,6 +342,17 @@ func FuzzParse(f *testing.F) {
 			if len(s.Name) > 64 {
 				t.Fatalf("skill name too long: %+v", s)
 			}
+		}
+		var out bytes.Buffer
+		if _, err := l.WriteTo(&out); err != nil {
+			t.Fatalf("a decoded log cannot be written: %v", err)
+		}
+		back, err := Parse(&out)
+		if err != nil {
+			t.Fatalf("a written log cannot be read: %v", err)
+		}
+		if !sameLog(l, back) {
+			t.Fatal("a written log reads back another log")
 		}
 	})
 }

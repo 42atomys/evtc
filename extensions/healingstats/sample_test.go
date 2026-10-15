@@ -43,8 +43,8 @@ func TestSampleOverview(t *testing.T) {
 	if s.Version != "2.18rc1" || s.Revision != 2 || s.Extension.Time <= 0 || s.Extension.Events().Count() != 2325 {
 		t.Errorf("version %q revision %d, %d events", s.Version, s.Revision, s.Extension.Events().Count())
 	}
-	if s.Heals().Count() != 2185 || s.Merged != 140 || s.Heals().Count()+s.Merged != s.Extension.Events().Count() {
-		t.Errorf("heals %d merged %d", s.Heals().Count(), s.Merged)
+	if s.Heals().Count() != 2135 || s.Merged != 190 || len(s.LeftOut) != 0 || s.Heals().Count()+s.Merged != s.Extension.Events().Count() {
+		t.Errorf("heals %d merged %d left out %d", s.Heals().Count(), s.Merged, len(s.LeftOut))
 	}
 	var names, want []string
 	for _, p := range s.Recorded {
@@ -57,14 +57,14 @@ func TestSampleOverview(t *testing.T) {
 		t.Errorf("recorded = %v, want %v", names, want)
 	}
 	pov := s.Agent(tl.POV)
-	if pov == nil || pov != s.Players().First() || !pov.Recorded || pov.Heals().Count() != 561 || pov.HealsTaken().Count() != 543 || pov.HealsCredited().Count() != 561 || pov.Heals().Healed() != 92624 {
+	if pov == nil || pov != s.Players().First() || !pov.Recorded || pov.Heals().Count() != 536 || pov.HealsTaken().Count() != 534 || pov.HealsCredited().Count() != 536 || pov.Heals().Healed() != 86228 {
 		t.Errorf("pov = %v: %d heals, %d taken, %d healed", pov, pov.Heals().Count(), pov.HealsTaken().Count(), pov.Heals().Healed())
 	}
 	q := s.Heals()
-	if q.Barrier().Count() != 889 || q.BarrierGiven() != 880974 || q.Downed().Count() != 34 || q.Self().Count() != 531 || q.Ticks().Count() != 788 || s.Unknown.Heals().Count() != 0 {
+	if q.Barrier().Count() != 871 || q.BarrierGiven() != 876656 || q.Downed().Count() != 30 || q.Self().Count() != 531 || q.Ticks().Count() != 764 || s.Unknown.Heals().Count() != 0 {
 		t.Errorf("barrier %d for %d, downed %d, self %d, ticks %d, unknown %d", q.Barrier().Count(), q.BarrierGiven(), q.Downed().Count(), q.Self().Count(), q.Ticks().Count(), s.Unknown.Heals().Count())
 	}
-	if withCast := q.Where(func(h *Heal) bool { return h.Cast != nil }).Count(); withCast != 639 {
+	if withCast := q.Where(func(h *Heal) bool { return h.Cast != nil }).Count(); withCast != 633 {
 		t.Errorf("heals attributed to a cast = %d", withCast)
 	}
 	first := q.First()
@@ -98,7 +98,7 @@ func TestSampleRankings(t *testing.T) {
 	// A heal written by both clients keeps the record of the recording
 	// player and the copy of the squad member.
 	merged := s.Heals().Where(func(h *Heal) bool { return h.PeerEvent != nil })
-	if merged.Count() != 140 {
+	if merged.Count() != 190 {
 		t.Fatalf("merged heals = %d", merged.Count())
 	}
 	pov := tl.POV.Ref()
